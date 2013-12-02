@@ -1,0 +1,33 @@
+Grammar -> MainFuncDecl
+
+MainFuncDecl    -> main FuncBody
+
+FuncBody        -> { VarDecl StatementList ReturnStatement }
+VarDecl         -> Type identifier ; VarDecl
+VarDecl         ->
+ReturnStatement -> return Expr ;
+
+StatementList   -> Statement StatementList
+StatementList   ->
+
+Statement       -> if ( Expr ) then Statement else Statement fi
+Statement       -> while ( Expr ) Statement
+Statement       -> print ( Expr ) ;
+Statement       -> { StatementList }
+Statement       -> IdAccess := Expr ;		// Meaning: assignment
+
+Expr            -> BaseExpr op BaseExpr
+Expr            -> ! BaseExpr
+Expr            -> BaseExpr
+
+BaseExpr        -> ( Expr )
+BaseExpr        -> IdAccess
+BaseExpr        -> integer
+BaseExpr        -> true
+BaseExpr        -> false
+BaseExpr        -> read ( )
+
+IdAccess        -> identifier
+
+Type            -> int
+Type            -> boolean

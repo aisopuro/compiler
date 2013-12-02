@@ -1,0 +1,411 @@
+import java.util.Deque;
+import java.util.ArrayDeque;
+import java.lang.Integer;
+
+COMPILER Grammar
+
+private Printer printer;
+
+private SymbolTable table = new SymbolTable();
+private CodeGenerator generator = new CodeGenerator();
+private Deque<Integer> stack = new ArrayDeque<Integer>();
+
+private static final int UNDEFINED = 0;
+private static final int INTEGER = UNDEFINED + 1;
+private static final int BOOLEAN = INTEGER + 1;
+
+
+private String id;
+private int expected = UNDEFINED;
+private int lastType = UNDEFINED;
+private int currentType = UNDEFINED;
+private int address = 0;
+
+private String out;
+
+private void resetContext() {
+	this.currentType = UNDEFINED;
+	this.expected = UNDEFINED;
+	this.lastType = UNDEFINED;
+}
+
+private void updateContext(int newCurrent, int newExpected) {
+	this.currentType = newCurrent;
+	this.expected = newExpected;
+}
+
+private boolean isCurrentContextValid(int previousType, int expected) {
+	if (!(this.currentType == expected || this.currentType == UNDEFINED))
+		printer.print("Incorrect context");
+	if (!(this.lastType == previousType))
+		printer.print("Incompatible type");
+	return ((this.currentType == expected || this.currentType == UNDEFINED) && this.lastType == previousType);
+}
+
+private boolean isCurrentContextValid(int expected) {
+	return isCurrentContextValid(expected, expected);
+}
+
+private void enterParenthesis(int currentContextType) {
+	this.stack.push(currentContextType);
+	this.currentType = this.expected;
+	this.expected = UNDEFINED;
+}
+
+private void exitParenthesis() {
+	this.lastType = this.currentType;
+	this.currentType = this.stack.pop();
+	this.expected = UNDEFINED;
+}
+
+public Parser(Scanner s, Printer p) {
+       this(s);
+       this.printer = p;
+}
+
+CHARACTERS
+	letter = 'A'..'Z' + 'a'..'z'.
+	digit = '0'..'9'.
+
+TOKENS
+	identifier = letter {letter | digit}.
+	integer = digit {digit}.
+
+IGNORE '\r'+'\t'+'\n'
+
+PRODUCTIONS
+
+Grammar			(. 
+					stack.push(UNDEFINED); // Set dummy value for stack bottom
+					printer.startProduction("Grammar"); 
+				.)
+=
+MainFuncDecl
+EOF				(. 
+					printer.print("Table: " + table.toString());
+					printer.endProduction("Grammar");
+				.)
+.
+
+MainFuncDecl	(. printer.startProduction("MainFuncDecl"); .)
+=
+"main"			(. 	
+				.)
+FuncBody		(. printer.endProduction("MainFuncDecl"); .)
+.
+
+FuncBody		(. printer.startProduction("FuncBody"); .)
+=
+"{"				(.  .)
+VarDecl
+StatementList
+ReturnStatement	
+"}"				(. 
+					
+					printer.endProduction("FuncBody");
+				.)
+.
+
+VarDecl			(. printer.startProduction("VarDecl"); .)
+=
+Type
+identifier		(.
+					printer.print("id: " + t.val);
+					if (expected != UNDEFINED) {
+						if (!table.exists(t.val)) {
+							// New variable
+							table.add(t.val, stack.peek(), 0);
+							generator.allocate(lastType);
+							generator.printProgram();
+							lastType = UNDEFINED;
+							printer.print("New variable: " + t.val + ":" + table.typeOf(t.val));
+							printer.print("Next: " + la.val);
+							
+						} 
+						else {
+							// Variable already declared
+						}
+					}
+					else {
+						// Invalid or missing type
+					}
+					expected = UNDEFINED;
+				.)
+";"				// New variable declared
+VarDecl			(. printer.endProduction("VarDecl"); .)
+|
+				(. 
+					printer.print("_");
+					printer.endProduction("VarDecl"); 
+				.)
+.
+
+StatementList	(. printer.startProduction("StatementList"); .)
+=
+Statement
+StatementList	(. printer.endProduction("StatementList"); .)
+|
+				(. printer.endProduction("StatementList"); .)
+.
+
+ReturnStatement	(. printer.startProduction("ReturnStatement"); .)
+=
+"return"		(. printer.print("return"); .)
+Expr
+";"				(. printer.endProduction("ReturnStatement"); .)
+.
+
+Statement		(. printer.startProduction("Statement"); .)
+=
+"if" 			(. 
+				 .)
+"(" 			(.
+					this.enterParenthesis(BOOLEAN);
+				.)
+Expr 
+")"				(. 
+					if (this.currentType != BOOLEAN) {
+						// ERROR, non-boolean expression in conditional
+						printer.print("Error in if-statement: " + this.currentType);
+					}
+					else {
+						printer.print("if ok");
+					}
+					stack.pop();
+					this.resetContext();
+				 .)
+"then"			(.printer.print("then");.)
+Statement
+"else"			(.printer.print("else");.)
+Statement
+"fi"			(.	
+					printer.print("fi");
+					expected = UNDEFINED;
+					printer.endProduction("Statement"); 
+				.)
+|
+"while"			(. 
+					printer.print("while");
+					stack.push(BOOLEAN);
+				 .)
+"("
+Expr
+")"				(.
+					if (stack.peek() != BOOLEAN) {
+						// ERROR, non-boolean expression
+						printer.print("Error in while-statement");
+					}
+					else {
+						printer.print("while ok");
+					}
+					expected = UNDEFINED;
+					stack.pop();
+				.)
+Statement		(.printer.endProduction("Statement");.)
+|
+"print"			(.printer.print("print");.)
+"("				
+Expr
+")"				
+";"				(. 
+					printer.endProduction("Statement"); 
+				.)	
+|
+"{"				
+StatementList	
+"}"				(. 
+					printer.endProduction("Statement"); 
+				.)
+|
+IdAccess
+":="			
+Expr			
+";"				(. 
+					expected = UNDEFINED;
+					printer.endProduction("Statement"); 
+				.)
+.
+
+
+
+
+Expr			(. printer.startProduction("Expr"); 
+					printer.print(t.val);.)
+=
+BaseExpr
+(
+op
+BaseExpr		(. printer.endProduction("Expr");.)
+|
+				(. printer.endProduction("Expr");.)
+)				
+|
+"!"				(. printer.print("!"); .)
+BaseExpr		
+.
+
+
+
+
+BaseExpr		(. 
+					printer.startProduction("BaseExpr");.)
+=
+"("				(.
+					printer.print(stack.size() + ": In with: " + currentType);
+					this.enterParenthesis(this.currentType);
+				 .)
+Expr			
+")"				(. 
+					this.exitParenthesis();
+					printer.print(stack.size() + ": Out with: " + lastType);
+					printer.endProduction("BaseExpr"); .)
+|
+IdAccess		(.printer.endProduction("BaseExpr");.)
+|
+integer			(. 	
+					printer.print(t.val);
+					lastType = INTEGER;
+					if (expected == INTEGER || expected == UNDEFINED) {
+						// Ok
+					}
+					else {
+						// Incompatible types
+						printer.print("Error: incompatible types, got integer, expected: " + expected);
+					}
+					printer.endProduction("BaseExpr");
+				 .)
+|
+"true"			(. 	
+					printer.print(t.val);
+					lastType = BOOLEAN;
+					if (expected == BOOLEAN || expected == UNDEFINED) {
+						// Ok
+					}
+					else {
+						// Incompatible types
+						printer.print("Error: incompatible types, got boolean, expected: " + expected);
+					}
+					printer.endProduction("BaseExpr"); 
+				.)
+|
+"false"			(. 	
+					printer.print(t.val);
+					if (expected == BOOLEAN || expected == UNDEFINED) {
+						// Ok
+					}
+					else {
+						// Incompatible types
+						printer.print("Error: incompatible types, got boolean, expected: " + expected);
+					}
+					printer.endProduction("BaseExpr"); 
+				.)
+|
+"read()"		(. 
+					// @TODO: Check read() input?
+					if (!(expected == expected)) {
+						// Incompatible types
+						printer.print("Error: incompatible types, got integer, expected: " + expected);
+					}
+					else {
+						// Correct
+					}
+					printer.endProduction("BaseExpr"); 
+				.)
+.
+
+IdAccess		(. printer.startProduction("IdAccess"); .) // Try to access a variable
+=
+identifier		(. 
+					if (table.exists(t.val)) {
+						// id is in table
+						printer.print("id found: " + t.val);
+					}
+					else {
+						printer.print("id not found: " + t.val);
+					}
+					
+					if (la.val.equals(":=")) {
+						currentType = table.typeOf(t.val);
+					}
+					printer.endProduction("IdAccess"); .)
+.
+
+
+Type			(. 
+					printer.startProduction("Type"); 
+				.)
+=
+"int"			(.	
+					printer.print("Type: " + t.val);
+					printer.print("Next: " + la.val);
+					expected = INTEGER;
+					printer.endProduction("Type");
+				.)
+|
+"boolean"		(.
+					printer.print("Type: " + t.val);
+					expected = BOOLEAN;
+					printer.endProduction("Type");
+				.)
+.
+
+op				(. printer.startProduction("op");
+					printer.print(la.val); .)
+=
+"+"				(. 
+					if (!isCurrentContextValid(INTEGER)) {
+						// ERROR, incompatible types
+						printer.print("Cannot add to boolean");
+					}
+					this.updateContext(INTEGER, INTEGER);
+					printer.endProduction("op"); 
+				.)
+|
+"-"				(. 
+					if (!isCurrentContextValid(INTEGER)) {
+						// ERROR, incompatible types
+						printer.print("Cannot subtract from boolean");
+					}
+					this.updateContext(INTEGER, INTEGER);
+					printer.endProduction("op"); 
+				.)
+|
+"*"				(. 
+					if (!isCurrentContextValid(INTEGER)) {
+						// ERROR, incompatible types
+						printer.print("Cannot multiply boolean");
+					}
+					this.updateContext(INTEGER, INTEGER);
+					printer.endProduction("op"); 
+				.)
+|
+"/"				(. 
+					if (!isCurrentContextValid(INTEGER)) {
+						// ERROR, incompatible types
+						printer.print("Cannot divide boolean");
+					}
+					this.updateContext(INTEGER, INTEGER);
+					printer.endProduction("op"); 
+				.)
+|
+"<"				(. 
+					if (!isCurrentContextValid(INTEGER, BOOLEAN)) {
+						// ERROR, incompatible types
+						printer.print("Cannot use relational operator on boolean");
+						printer.print("" + this.lastType + " " + this.currentType);
+					}
+					this.updateContext(BOOLEAN, INTEGER);
+					printer.endProduction("op"); 
+				.)
+|
+"&&"			(. 
+					if (!isCurrentContextValid(BOOLEAN)) {
+						// ERROR, incompatible types
+						printer.print("Cannot use AND-operator on integers");
+					}
+					this.updateContext(BOOLEAN, BOOLEAN);
+					printer.endProduction("op"); 
+				.)
+.
+
+END Grammar.
