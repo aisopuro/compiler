@@ -23,23 +23,51 @@ public class Parser {
 
 	private Printer printer;
 
+private class Context {
+	public int currentType;
+	public int expected;
+	public CodeGenerator.ops previousOp;
+
+	public Context(int current, int next, CodeGenerator.ops previousOp) {
+		this.currentType = current;
+		this.expected = next;
+		this.previousOp = previousOp;
+	}
+
+	public void resetTo(int v, CodeGenerator.ops last) {
+		this.currentType = v;
+		this.expected = v;
+		this.previousOp = last;
+	}
+}
+
 private SymbolTable table = new SymbolTable();
 private CodeGenerator generator = new CodeGenerator();
 private Deque<Integer> stack = new ArrayDeque<Integer>();
+private Deque<Context> contextStack = new ArrayDeque<Context>();
 
+
+
+// Token types
 private static final int UNDEFINED = 0;
 private static final int INTEGER = UNDEFINED + 1;
 private static final int BOOLEAN = INTEGER + 1;
 
+// @SLX
+
+private Context currentContext;
 
 private String id;
-private int expected = UNDEFINED;
-private int lastType = UNDEFINED;
-private int currentType = UNDEFINED;
-private int address = 0;
+private int expected = UNDEFINED; // Type of token expected next
+private int lastType = UNDEFINED; // Type of token last processed
+private int currentType = UNDEFINED; // Token type to be returned from current indentation
+private int heapTop = 1; // The top of the heap where variables are stored
+private boolean afterOperator = false; // 
+private int previousOp;
 
 private String out;
 
+// Reset type context
 private void resetContext() {
 	this.currentType = UNDEFINED;
 	this.expected = UNDEFINED;
@@ -49,13 +77,19 @@ private void resetContext() {
 private void updateContext(int newCurrent, int newExpected) {
 	this.currentType = newCurrent;
 	this.expected = newExpected;
+	this.currentContext.currentType = newCurrent;
+	this.currentContext.expected = newExpected;
 }
 
 private boolean isCurrentContextValid(int previousType, int expected) {
-	if (!(this.currentType == expected || this.currentType == UNDEFINED))
+	if (!(this.currentType == expected || this.currentType == UNDEFINED)) {
 		printer.print("Incorrect context");
-	if (!(this.lastType == previousType))
+		this.SemErr("unexpected operation type");
+	}
+	if (!(this.lastType == previousType)) {
 		printer.print("Incompatible type");
+		this.SemErr("unexpected type");
+	}
 	return ((this.currentType == expected || this.currentType == UNDEFINED) && this.lastType == previousType);
 }
 
@@ -67,12 +101,54 @@ private void enterParenthesis(int currentContextType) {
 	this.stack.push(currentContextType);
 	this.currentType = this.expected;
 	this.expected = UNDEFINED;
+	this.lastType = UNDEFINED;
+	this.contextStack.push(this.currentContext);
 }
 
 private void exitParenthesis() {
 	this.lastType = this.currentType;
 	this.currentType = this.stack.pop();
 	this.expected = UNDEFINED;
+	this.afterOperator = false;
+	this.currentContext = this.contextStack.pop();
+	if (this.currentContext.previousOp != CodeGenerator.ops.NOP) {
+		// An operation is scheduled for the result of the parenthesis
+		this.generator.commandOp(this.currentContext.previousOp);
+	}
+}
+
+// Store new variable onto the heap
+private boolean storeNewVariable(String name, int type) {
+	boolean taken = this.table.exists(name);
+	if (this.expected == UNDEFINED) {
+		// Error, missing Type declaration
+		this.SemErr("undeclared variable type");
+	}
+	else {
+		if (taken) {
+			// Error, variable already declared
+			this.SemErr("a variable by that name already exists");
+		}
+		else {
+			// Ok, add variable
+			this.table.add(name, type, this.heapTop);
+			this.heapTop++;
+			// @SLX: DONE
+			this.generator.allocate(type);
+		}
+	}
+	return !taken;
+}
+
+// Check if a type is within expected parameters
+private boolean isExpected(int type) {
+	boolean unexpected = (expected != type && expected != UNDEFINED);
+	if (unexpected) {
+		// Incompatible types
+		printer.print("Error: incompatible types, got integer, expected: " + expected);
+		this.SemErr("type mismatch");
+	}
+	return unexpected;
 }
 
 public Parser(Scanner s, Printer p) {
@@ -177,25 +253,7 @@ public Parser(Scanner s, Printer p) {
 			Type();
 			Expect(1);
 			printer.print("id: " + t.val);
-			if (expected != UNDEFINED) {
-				if (!table.exists(t.val)) {
-					// New variable
-					table.add(t.val, stack.peek(), 0);
-					generator.allocate(lastType);
-					generator.printProgram();
-					lastType = UNDEFINED;
-					printer.print("New variable: " + t.val + ":" + table.typeOf(t.val));
-					printer.print("Next: " + la.val);
-					
-				} 
-				else {
-					// Variable already declared
-				}
-			}
-			else {
-				// Invalid or missing type
-			}
-			expected = UNDEFINED;
+			this.storeNewVariable(t.val, stack.peek());
 			
 			Expect(6);
 			VarDecl();
@@ -234,13 +292,15 @@ public Parser(Scanner s, Printer p) {
 			Get();
 			printer.print("Type: " + t.val);
 			printer.print("Next: " + la.val);
-			expected = INTEGER;
+			this.expected = INTEGER;
+			this.currentContext.expected = INTEGER;
 			printer.endProduction("Type");
 			
 		} else if (la.kind == 22) {
 			Get();
 			printer.print("Type: " + t.val);
-			expected = BOOLEAN;
+			this.expected = BOOLEAN;
+			this.currentContext.expected = BOOLEAN;
 			printer.endProduction("Type");
 			
 		} else SynErr(32);
@@ -263,14 +323,17 @@ public Parser(Scanner s, Printer p) {
 			else {
 				printer.print("if ok");
 			}
-			stack.pop();
+			this.exitParenthesis();
 			this.resetContext();
 			
 			Expect(11);
 			printer.print("then");
+			
 			Statement();
 			Expect(12);
 			printer.print("else");
+			// @SLX: log current line of SLX program and make a conditional jump to here
+			
 			Statement();
 			Expect(13);
 			printer.print("fi");
@@ -281,8 +344,10 @@ public Parser(Scanner s, Printer p) {
 			Get();
 			printer.print("while");
 			stack.push(BOOLEAN);
+			// @SLX: log current line of SLX program and make a conditional jump to here
 			
 			Expect(9);
+			this.enterParenthesis(BOOLEAN);
 			Expr();
 			Expect(10);
 			if (stack.peek() != BOOLEAN) {
@@ -292,17 +357,21 @@ public Parser(Scanner s, Printer p) {
 			else {
 				printer.print("while ok");
 			}
-			expected = UNDEFINED;
-			stack.pop();
+			this.exitParenthesis();
+			this.resetContext();
 			
 			Statement();
 			printer.endProduction("Statement");
+			// @SLX: make conditional jump to while
+			
 		} else if (la.kind == 15) {
 			Get();
 			printer.print("print");
 			Expect(9);
 			Expr();
 			Expect(10);
+			this.generator.commandPrint();
+			
 			Expect(6);
 			printer.endProduction("Statement"); 
 			
@@ -315,7 +384,13 @@ public Parser(Scanner s, Printer p) {
 		} else if (la.kind == 1) {
 			IdAccess();
 			Expect(16);
+			this.currentContext.previousOp = CodeGenerator.ops.ASG;
+			
 			Expr();
+			if (this.lastType == expected) {
+			this.generator.commandAssignment();
+			}
+			
 			Expect(6);
 			expected = UNDEFINED;
 			printer.endProduction("Statement"); 
@@ -325,12 +400,13 @@ public Parser(Scanner s, Printer p) {
 
 	void Expr() {
 		printer.startProduction("Expr"); 
-		printer.print(t.val);
+		
 		if (StartOf(3)) {
 			BaseExpr();
 			if (StartOf(4)) {
 				op();
 				BaseExpr();
+				this.generator.commandOp(this.currentContext.previousOp);
 				printer.endProduction("Expr");
 			} else if (la.kind == 6 || la.kind == 10) {
 				printer.endProduction("Expr");
@@ -338,7 +414,18 @@ public Parser(Scanner s, Printer p) {
 		} else if (la.kind == 17) {
 			Get();
 			printer.print("!"); 
+			this.expected = BOOLEAN;
+			// @SLX: Negation here
+			
 			BaseExpr();
+			if (this.lastType != BOOLEAN) {
+			// Error, negating non-boolean
+			this.SemErr("trying to negate non-boolean");
+			}
+			else {
+				this.generator.commandNegation();
+			}
+			
 		} else SynErr(35);
 	}
 
@@ -346,17 +433,23 @@ public Parser(Scanner s, Printer p) {
 		printer.startProduction("IdAccess"); 
 		Expect(1);
 		if (table.exists(t.val)) {
-		// id is in table
+		// id is in table, fetch it to the stack
+		this.generator.commandLoad(this.table.addressOf(t.val));
 		printer.print("id found: " + t.val);
+		if (la.val.equals(":=")) {
+			// Assignment coming up
+			this.currentType = table.typeOf(t.val);
+		}
+		else {
+			this.lastType = this.table.typeOf(t.val);
+		}
 		}
 		else {
 			printer.print("id not found: " + t.val);
+			this.SemErr("no variable named " + t.val);
 		}
 		
-		if (la.val.equals(":=")) {
-			currentType = table.typeOf(t.val);
-		}
-		printer.endProduction("IdAccess"); 
+			printer.endProduction("IdAccess"); 
 	}
 
 	void BaseExpr() {
@@ -382,14 +475,8 @@ public Parser(Scanner s, Printer p) {
 		case 2: {
 			Get();
 			printer.print(t.val);
-			lastType = INTEGER;
-			if (expected == INTEGER || expected == UNDEFINED) {
-				// Ok
-			}
-			else {
-				// Incompatible types
-				printer.print("Error: incompatible types, got integer, expected: " + expected);
-			}
+			this.lastType = INTEGER;
+			this.isExpected(INTEGER);
 			printer.endProduction("BaseExpr");
 			
 			break;
@@ -397,14 +484,8 @@ public Parser(Scanner s, Printer p) {
 		case 18: {
 			Get();
 			printer.print(t.val);
-			lastType = BOOLEAN;
-			if (expected == BOOLEAN || expected == UNDEFINED) {
-				// Ok
-			}
-			else {
-				// Incompatible types
-				printer.print("Error: incompatible types, got boolean, expected: " + expected);
-			}
+			this.lastType = BOOLEAN;
+			this.isExpected(BOOLEAN);
 			printer.endProduction("BaseExpr"); 
 			
 			break;
@@ -412,27 +493,17 @@ public Parser(Scanner s, Printer p) {
 		case 19: {
 			Get();
 			printer.print(t.val);
-			if (expected == BOOLEAN || expected == UNDEFINED) {
-				// Ok
-			}
-			else {
-				// Incompatible types
-				printer.print("Error: incompatible types, got boolean, expected: " + expected);
-			}
+			this.lastType = BOOLEAN;
+			this.isExpected(BOOLEAN);
 			printer.endProduction("BaseExpr"); 
 			
 			break;
 		}
 		case 20: {
 			Get();
-			if (!(expected == expected)) {
-			// Incompatible types
-			printer.print("Error: incompatible types, got integer, expected: " + expected);
-			}
-			else {
-				// Correct
-			}
-			printer.endProduction("BaseExpr"); 
+			this.lastType = INTEGER;
+			this.isExpected(INTEGER);
+			this.generator.commandRead();
 			
 			break;
 		}
@@ -446,67 +517,66 @@ public Parser(Scanner s, Printer p) {
 		switch (la.kind) {
 		case 23: {
 			Get();
-			if (!isCurrentContextValid(INTEGER)) {
-			// ERROR, incompatible types
-			printer.print("Cannot add to boolean");
+			if (isCurrentContextValid(INTEGER)) {
+			// @SLX: ADD
 			}
 			this.updateContext(INTEGER, INTEGER);
+			this.currentContext.previousOp = CodeGenerator.ops.ADD;
 			printer.endProduction("op"); 
 			
 			break;
 		}
 		case 24: {
 			Get();
-			if (!isCurrentContextValid(INTEGER)) {
-			// ERROR, incompatible types
-			printer.print("Cannot subtract from boolean");
+			if (isCurrentContextValid(INTEGER)) {
+			// @SLX: SUB
 			}
 			this.updateContext(INTEGER, INTEGER);
+			this.currentContext.previousOp = CodeGenerator.ops.SUB;
 			printer.endProduction("op"); 
 			
 			break;
 		}
 		case 25: {
 			Get();
-			if (!isCurrentContextValid(INTEGER)) {
-			// ERROR, incompatible types
-			printer.print("Cannot multiply boolean");
+			if (isCurrentContextValid(INTEGER)) {
+			// @SLX: MUL
 			}
 			this.updateContext(INTEGER, INTEGER);
+			this.currentContext.previousOp = CodeGenerator.ops.MUL;
 			printer.endProduction("op"); 
 			
 			break;
 		}
 		case 26: {
 			Get();
-			if (!isCurrentContextValid(INTEGER)) {
-			// ERROR, incompatible types
-			printer.print("Cannot divide boolean");
+			if (isCurrentContextValid(INTEGER)) {
+			// @SLX: DIV
 			}
 			this.updateContext(INTEGER, INTEGER);
+			this.currentContext.previousOp = CodeGenerator.ops.DIV;
 			printer.endProduction("op"); 
 			
 			break;
 		}
 		case 27: {
 			Get();
-			if (!isCurrentContextValid(INTEGER, BOOLEAN)) {
-			// ERROR, incompatible types
-			printer.print("Cannot use relational operator on boolean");
-			printer.print("" + this.lastType + " " + this.currentType);
+			if (isCurrentContextValid(INTEGER, BOOLEAN)) {
+			// @SLX: LESS_THAN
 			}
 			this.updateContext(BOOLEAN, INTEGER);
+			this.currentContext.previousOp = CodeGenerator.ops.LSS;
 			printer.endProduction("op"); 
 			
 			break;
 		}
 		case 28: {
 			Get();
-			if (!isCurrentContextValid(BOOLEAN)) {
-			// ERROR, incompatible types
-			printer.print("Cannot use AND-operator on integers");
+			if (isCurrentContextValid(BOOLEAN)) {
+			// @SLX: AND
 			}
 			this.updateContext(BOOLEAN, BOOLEAN);
+			this.currentContext.previousOp = CodeGenerator.ops.AND;
 			printer.endProduction("op"); 
 			
 			break;
