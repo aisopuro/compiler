@@ -11,17 +11,20 @@ public class TestMain {
 
 		// Run tests on all test cases
 		String name;
+		/*
 		for ( File current : file.listFiles() ) {
 			name = current.getPath();
 			System.out.println(name);
+                        System.out.println("=======================");
+			
 			compiler.compile(name);
 
 			System.out.println("\n######################\n");
 		}
-		
-		compiler.compile("tests/assignment.tst");
-		System.out.println("\n######################\n");
-		compiler.compile("tests/and.tst");
+                */
+                compiler.compile("tests/wrongTypeInAssignmentBooleanInt.tst");
+                System.out.println("\n######################\n");
+                compiler.compile("tests/wrongTypeInAssignmentIntBoolean.tst");
 	}
 
 }

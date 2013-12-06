@@ -18,17 +18,17 @@ public class CodeGenerator {
 		NOP, ADD, SUB, MUL, DIV, LSS, AND, ASG
 	}
 	
-	private class ifLabels {
+	private class flowLabels {
 		public int controlLabel;
 		public int endLabel;
 		
-		public ifLabels(int control, int end) {
+		public flowLabels(int control, int end) {
 			this.controlLabel = control;
 			this.endLabel = end;
 		}
 	}
 	
-	private Deque<ifLabels> currentLabels = new ArrayDeque<ifLabels>(); // Stack for keeping track of if-else nesting
+	private Deque<flowLabels> currentLabels = new ArrayDeque<flowLabels>(); // Stack for keeping track of if-else nesting
 	
 	private int offset = 0;
 
@@ -69,25 +69,30 @@ public class CodeGenerator {
 	
 	public void commandOp(CodeGenerator.ops opType) {
 		if (opType == ops.ADD) {
-			// Add
+			this.assembler.emit(CommandWord.ADD);
 		}
 		else if (opType == ops.SUB) {
 			// Subtract
+                    this.assembler.emit(CommandWord.SUB);
 		}
 		else if (opType == ops.MUL) {
 			// Multiply
+                    this.assembler.emit(CommandWord.MUL);
 		}
 		else if (opType == ops.DIV) {
 			// Divide
+                    this.assembler.emit(CommandWord.DIV);
 		}
 		else if (opType == ops.LSS) {
 			// Less than
+                    this.assembler.emit(CommandWord.RLT);
 		}
 		else if (opType == ops.AND) {
 			// And
-		}
-		else if (opType == ops.ASG) {
-			// Assignment
+		    // (pop == true) == pop
+                    this.assembler.emit(CommandWord.ENT, 1);
+                    this.assembler.emit(CommandWord.REQ);
+                    this.assembler.emit(CommandWord.REQ);
 		}
 		else {
 			// NOP
@@ -105,7 +110,7 @@ public class CodeGenerator {
 	
 	public void startIf() {
 		// Create new label context and push it on the stack
-		ifLabels currentIndent = new ifLabels(this.newAddress(), this.newAddress());
+		flowLabels currentIndent = new flowLabels(this.newAddress(), this.newAddress());
 		this.currentLabels.push(currentIndent);
 	}
 	
@@ -130,7 +135,7 @@ public class CodeGenerator {
 	
 	public void startWhile() {
 		// Create new label context onto the stack
-		this.currentLabels.push(new ifLabels(this.newAddress(), this.newAddress()));
+		this.currentLabels.push(new flowLabels(this.newAddress(), this.newAddress()));
 		// Label the beginning of the while loop
 		this.assembler.emit(CommandWord.LAB, this.currentLabels.peek().controlLabel);
 	}
@@ -147,6 +152,9 @@ public class CodeGenerator {
 		this.assembler.emit(CommandWord.LAB, this.currentLabels.peek().endLabel);
 		// Pop the label context
 		this.currentLabels.pop();
+	}
+	public void halt() {
+	    this.assembler.emit(CommandWord.HLT);
 	}
 
 	public void printProgram() {

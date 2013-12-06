@@ -4,6 +4,8 @@ import java.util.Deque;
 import java.util.ArrayDeque;
 import java.lang.Integer;
 
+
+
 public class Parser {
 	public static final int _EOF = 0;
 	public static final int _identifier = 1;
@@ -61,7 +63,6 @@ private String id;
 private int expected = UNDEFINED; // Type of token expected next
 private int lastType = UNDEFINED; // Type of token last processed
 private int currentType = UNDEFINED; // Token type to be returned from current indentation
-private int heapTop = 1; // The top of the heap where variables are stored
 private boolean afterOperator = false; // 
 private int previousOp;
 
@@ -82,7 +83,7 @@ private void updateContext(int newCurrent, int newExpected) {
 }
 
 private boolean isCurrentContextValid(int previousType, int expected) {
-	if (!(this.currentType == expected || this.currentType == UNDEFINED)) {
+	if (!(this.currentType == this.expected || this.currentType == UNDEFINED)) {
 		printer.print("Incorrect context");
 		this.SemErr("unexpected operation type");
 	}
@@ -103,6 +104,7 @@ private void enterParenthesis(int currentContextType) {
 	this.expected = UNDEFINED;
 	this.lastType = UNDEFINED;
 	this.contextStack.push(this.currentContext);
+	this.currentContext = new Context(this.currentType, this.expected, CodeGenerator.ops.NOP);
 }
 
 private void exitParenthesis() {
@@ -127,14 +129,13 @@ private boolean storeNewVariable(String name, int type) {
 	else {
 		if (taken) {
 			// Error, variable already declared
-			this.SemErr("a variable by that name already exists");
+			this.SemErr("a variable by that name already exists");	
 		}
 		else {
 			// Ok, add variable
-			this.table.add(name, type, this.heapTop);
-			this.heapTop++;
+			int address = this.generator.allocate();
+			this.table.add(name, type, address);
 			// @SLX: DONE
-			this.generator.allocate(type);
 		}
 	}
 	return !taken;
@@ -142,13 +143,28 @@ private boolean storeNewVariable(String name, int type) {
 
 // Check if a type is within expected parameters
 private boolean isExpected(int type) {
-	boolean unexpected = (expected != type && expected != UNDEFINED);
+	boolean unexpected = (this.expected != type && this.expected != UNDEFINED);
 	if (unexpected) {
 		// Incompatible types
 		printer.print("Error: incompatible types, got integer, expected: " + expected);
 		this.SemErr("type mismatch");
 	}
 	return unexpected;
+}
+
+private void checkInteger(String value) {
+	int val = Integer.MAX_VALUE;
+	try {
+		val = Integer.valueOf(value);
+	}
+	catch (NumberFormatException e) {
+		// Number is too large
+		this.SemErr("overflow: integer is too large");
+	}
+	
+	this.lastType = INTEGER;
+	this.isExpected(INTEGER);
+	this.generator.push(val);
 }
 
 public Parser(Scanner s, Printer p) {
@@ -218,11 +234,13 @@ public Parser(Scanner s, Printer p) {
 	
 	void Grammar() {
 		stack.push(UNDEFINED); // Set dummy value for stack bottom
+		this.currentContext = new Context(0, 0, CodeGenerator.ops.NOP);
 		printer.startProduction("Grammar"); 
 		
 		MainFuncDecl();
 		Expect(0);
 		printer.print("Table: " + table.toString());
+		this.generator.halt();
 		printer.endProduction("Grammar");
 		
 	}
@@ -253,9 +271,11 @@ public Parser(Scanner s, Printer p) {
 			Type();
 			Expect(1);
 			printer.print("id: " + t.val);
-			this.storeNewVariable(t.val, stack.peek());
+			this.storeNewVariable(t.val, this.currentContext.expected);
 			
 			Expect(6);
+			this.resetContext();
+			
 			VarDecl();
 			printer.endProduction("VarDecl"); 
 		} else if (StartOf(1)) {
@@ -310,6 +330,7 @@ public Parser(Scanner s, Printer p) {
 		printer.startProduction("Statement"); 
 		if (la.kind == 8) {
 			Get();
+			this.generator.startIf();
 			
 			Expect(9);
 			this.enterParenthesis(BOOLEAN);
@@ -319,23 +340,27 @@ public Parser(Scanner s, Printer p) {
 			if (this.currentType != BOOLEAN) {
 			// ERROR, non-boolean expression in conditional
 			printer.print("Error in if-statement: " + this.currentType);
+			this.SemErr("incorrect if-declaration");
 			}
 			else {
-				printer.print("if ok");
+			printer.print("if ok");
 			}
 			this.exitParenthesis();
 			this.resetContext();
 			
 			Expect(11);
+			this.generator.startThen();
 			printer.print("then");
 			
 			Statement();
 			Expect(12);
+			this.generator.startElse();
 			printer.print("else");
 			// @SLX: log current line of SLX program and make a conditional jump to here
 			
 			Statement();
 			Expect(13);
+			this.generator.startFi();
 			printer.print("fi");
 			expected = UNDEFINED;
 			printer.endProduction("Statement"); 
@@ -344,7 +369,7 @@ public Parser(Scanner s, Printer p) {
 			Get();
 			printer.print("while");
 			stack.push(BOOLEAN);
-			// @SLX: log current line of SLX program and make a conditional jump to here
+			this.generator.startWhile();
 			
 			Expect(9);
 			this.enterParenthesis(BOOLEAN);
@@ -352,17 +377,18 @@ public Parser(Scanner s, Printer p) {
 			Expect(10);
 			if (stack.peek() != BOOLEAN) {
 			// ERROR, non-boolean expression
-			printer.print("Error in while-statement");
+			this.SemErr("incorrect while-declaration");
 			}
 			else {
 				printer.print("while ok");
 			}
+			this.generator.endWhileConditional();
 			this.exitParenthesis();
 			this.resetContext();
 			
 			Statement();
 			printer.endProduction("Statement");
-			// @SLX: make conditional jump to while
+			this.generator.endWhileBody();
 			
 		} else if (la.kind == 15) {
 			Get();
@@ -385,14 +411,16 @@ public Parser(Scanner s, Printer p) {
 			IdAccess();
 			Expect(16);
 			this.currentContext.previousOp = CodeGenerator.ops.ASG;
+			this.enterParenthesis(this.currentType);
 			
 			Expr();
-			if (this.lastType == expected) {
+			if (this.lastType == this.expected) {
 			this.generator.commandAssignment();
 			}
 			
 			Expect(6);
-			expected = UNDEFINED;
+			this.exitParenthesis();
+			this.resetContext();
 			printer.endProduction("Statement"); 
 			
 		} else SynErr(33);
@@ -423,7 +451,7 @@ public Parser(Scanner s, Printer p) {
 			this.SemErr("trying to negate non-boolean");
 			}
 			else {
-				this.generator.commandNegation();
+			this.generator.commandNegation();
 			}
 			
 		} else SynErr(35);
@@ -432,24 +460,22 @@ public Parser(Scanner s, Printer p) {
 	void IdAccess() {
 		printer.startProduction("IdAccess"); 
 		Expect(1);
-		if (table.exists(t.val)) {
+		if (this.table.exists(t.val)) {
 		// id is in table, fetch it to the stack
 		this.generator.commandLoad(this.table.addressOf(t.val));
 		printer.print("id found: " + t.val);
-		if (la.val.equals(":=")) {
+		if (this.la.val.equals(":=")) {
 			// Assignment coming up
-			this.currentType = table.typeOf(t.val);
+			this.currentType = this.table.typeOf(t.val);
+		}
+		this.lastType = this.table.typeOf(t.val);
 		}
 		else {
-			this.lastType = this.table.typeOf(t.val);
-		}
-		}
-		else {
-			printer.print("id not found: " + t.val);
-			this.SemErr("no variable named " + t.val);
+		printer.print("id not found: " + t.val);
+		this.SemErr("no variable named " + t.val);
 		}
 		
-			printer.endProduction("IdAccess"); 
+		printer.endProduction("IdAccess"); 
 	}
 
 	void BaseExpr() {
@@ -475,8 +501,7 @@ public Parser(Scanner s, Printer p) {
 		case 2: {
 			Get();
 			printer.print(t.val);
-			this.lastType = INTEGER;
-			this.isExpected(INTEGER);
+			this.checkInteger(t.val);
 			printer.endProduction("BaseExpr");
 			
 			break;
@@ -486,6 +511,7 @@ public Parser(Scanner s, Printer p) {
 			printer.print(t.val);
 			this.lastType = BOOLEAN;
 			this.isExpected(BOOLEAN);
+			this.generator.push(1);
 			printer.endProduction("BaseExpr"); 
 			
 			break;
@@ -495,6 +521,7 @@ public Parser(Scanner s, Printer p) {
 			printer.print(t.val);
 			this.lastType = BOOLEAN;
 			this.isExpected(BOOLEAN);
+			this.generator.push(0);
 			printer.endProduction("BaseExpr"); 
 			
 			break;
@@ -517,8 +544,7 @@ public Parser(Scanner s, Printer p) {
 		switch (la.kind) {
 		case 23: {
 			Get();
-			if (isCurrentContextValid(INTEGER)) {
-			// @SLX: ADD
+			if (!isCurrentContextValid(INTEGER)) {	
 			}
 			this.updateContext(INTEGER, INTEGER);
 			this.currentContext.previousOp = CodeGenerator.ops.ADD;
@@ -528,7 +554,7 @@ public Parser(Scanner s, Printer p) {
 		}
 		case 24: {
 			Get();
-			if (isCurrentContextValid(INTEGER)) {
+			if (!isCurrentContextValid(INTEGER)) {
 			// @SLX: SUB
 			}
 			this.updateContext(INTEGER, INTEGER);
@@ -539,7 +565,7 @@ public Parser(Scanner s, Printer p) {
 		}
 		case 25: {
 			Get();
-			if (isCurrentContextValid(INTEGER)) {
+			if (!isCurrentContextValid(INTEGER)) {
 			// @SLX: MUL
 			}
 			this.updateContext(INTEGER, INTEGER);
@@ -550,7 +576,7 @@ public Parser(Scanner s, Printer p) {
 		}
 		case 26: {
 			Get();
-			if (isCurrentContextValid(INTEGER)) {
+			if (!isCurrentContextValid(INTEGER)) {
 			// @SLX: DIV
 			}
 			this.updateContext(INTEGER, INTEGER);
@@ -561,7 +587,7 @@ public Parser(Scanner s, Printer p) {
 		}
 		case 27: {
 			Get();
-			if (isCurrentContextValid(INTEGER, BOOLEAN)) {
+			if (!isCurrentContextValid(INTEGER, BOOLEAN)) {
 			// @SLX: LESS_THAN
 			}
 			this.updateContext(BOOLEAN, INTEGER);
@@ -572,7 +598,7 @@ public Parser(Scanner s, Printer p) {
 		}
 		case 28: {
 			Get();
-			if (isCurrentContextValid(BOOLEAN)) {
+			if (!isCurrentContextValid(BOOLEAN)) {
 			// @SLX: AND
 			}
 			this.updateContext(BOOLEAN, BOOLEAN);
@@ -592,8 +618,8 @@ public Parser(Scanner s, Printer p) {
 		la.val = "";		
 		Get();
 		Grammar();
-
 		Expect(0);
+
 	}
 
 	private static final boolean[][] set = {
@@ -694,4 +720,3 @@ class FatalError extends RuntimeException {
 	public static final long serialVersionUID = 1L;
 	public FatalError(String s) { super(s); }
 }
-

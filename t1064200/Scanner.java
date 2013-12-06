@@ -6,12 +6,13 @@ import java.util.Map;
 import java.util.HashMap;
 
 class Token {
-	int kind;    // token kind
-	int pos;     // token position in the source text (starting at 0)
-	int col;     // token column (starting at 1)
-	int line;    // token line (starting at 1)
-	String val;  // token value
-	Token next;  // ML 2005-03-11 Peek tokens are kept in linked list
+	public int kind;    // token kind
+	public int pos;     // token position in bytes in the source text (starting at 0)
+	public int charPos; // token position in characters in the source text (starting at 0)
+	public int col;     // token column (starting at 1)
+	public int line;    // token line (starting at 1)
+	public String val;  // token value
+	public Token next;  // ML 2005-03-11 Peek tokens are kept in linked list
 }
 
 //-----------------------------------------------------------------------------------
@@ -106,14 +107,16 @@ class Buffer {
 		return ch;
 	}
 
+	// beg .. begin, zero-based, inclusive, in byte
+	// end .. end, zero-based, exclusive, in byte
 	public String GetString(int beg, int end) {
-	    int len = end - beg;
-	    char[] buf = new char[len];
-	    int oldPos = getPos();
-	    setPos(beg);
-	    for (int i = 0; i < len; ++i) buf[i] = (char) Read();
-	    setPos(oldPos);
-	    return new String(buf);
+		int len = 0;
+		char[] buf = new char[end - beg];
+		int oldPos = getPos();
+		setPos(beg);
+		while (getPos() < end) buf[len++] = (char) Read();
+		setPos(oldPos);
+		return new String(buf, 0, len);
 	}
 
 	public int getPos() {
@@ -256,6 +259,7 @@ public class Scanner {
 	Token t;           // current token
 	int ch;            // current input character
 	int pos;           // byte position of current character
+	int charPos;       // position by unicode characters starting with 0
 	int col;           // column number of current character
 	int line;          // line number of current character
 	int oldEols;       // EOLs that appeared in a comment;
@@ -265,8 +269,10 @@ public class Scanner {
 	Token tokens;      // list of tokens already peeked (first token is a dummy)
 	Token pt;          // current peek token
 	
-	char[] tokenText = new char[16]; // token text used in NextToken(), dynamically enlarged
-	
+	char[] tval = new char[16]; // token text used in NextToken(), dynamically enlarged
+	int tlen;          // length of current token
+
+
 	static {
 		start = new StartStates();
 		literals = new HashMap();
@@ -315,7 +321,7 @@ public class Scanner {
 	}
 	
 	void Init () {
-		pos = -1; line = 1; col = 0;
+		pos = -1; line = 1; col = 0; charPos = -1;
 		oldEols = 0;
 		NextCh();
 		if (ch == 0xEF) { // check optional byte order mark for UTF-8
@@ -324,7 +330,7 @@ public class Scanner {
 			if (ch1 != 0xBB || ch2 != 0xBF) {
 				throw new FatalError("Illegal byte order mark at start of file");
 			}
-			buffer = new UTF8Buffer(buffer); col = 0;
+			buffer = new UTF8Buffer(buffer); col = 0; charPos = -1;
 			NextCh();
 		}
 		pt = tokens = new Token();  // first token is a dummy
@@ -334,11 +340,26 @@ public class Scanner {
 		if (oldEols > 0) { ch = EOL; oldEols--; }
 		else {
 			pos = buffer.getPos();
-			ch = buffer.Read(); col++;
+			// buffer reads unicode chars, if UTF8 has been detected
+			ch = buffer.Read(); col++; charPos++;
 			// replace isolated '\r' by '\n' in order to make
 			// eol handling uniform across Windows, Unix and Mac
 			if (ch == '\r' && buffer.Peek() != '\n') ch = EOL;
 			if (ch == EOL) { line++; col = 0; }
+		}
+
+	}
+	
+	void AddCh() {
+		if (tlen >= tval.length) {
+			char[] newBuf = new char[2 * tval.length];
+			System.arraycopy(tval, 0, newBuf, 0, tval.length);
+			tval = newBuf;
+		}
+		if (ch != Buffer.EOF) {
+			tval[tlen++] = (char)ch; 
+
+			NextCh();
 		}
 
 	}
@@ -355,91 +376,104 @@ public class Scanner {
 	}
 
 	Token NextToken() {
-		while(ch == ' ' ||
+		while (ch == ' ' ||
 			ch >= 9 && ch <= 10 || ch == 13
 		) NextCh();
 
+		int recKind = noSym;
+		int recEnd = pos;
 		t = new Token();
-		t.pos = pos; t.col = col; t.line = line; 
+		t.pos = pos; t.col = col; t.line = line; t.charPos = charPos;
 		int state = start.state(ch);
-		char[] tval = tokenText; // local variables are more efficient
-		int tlen = 0;
-		tval[tlen++] = (char)ch; NextCh();
-		
-		boolean done = false;
-		while (!done) {
-			if (tlen >= tval.length) {
-				char[] newBuf = new char[2 * tval.length];
-				System.arraycopy(tval, 0, newBuf, 0, tval.length);
-				tokenText = tval = newBuf;
-			}
+		tlen = 0; AddCh();
+
+		loop: for (;;) {
 			switch (state) {
-				case -1: { t.kind = eofSym; done = true; break; } // NextCh already done 
-				case 0: { t.kind = noSym; done = true; break; }   // NextCh already done
+				case -1: { t.kind = eofSym; break loop; } // NextCh already done 
+				case 0: {
+					if (recKind != noSym) {
+						tlen = recEnd - t.pos;
+						SetScannerBehindT();
+					}
+					t.kind = recKind; break loop;
+				} // NextCh already done
 				case 1:
-					if (ch >= '0' && ch <= '9' || ch >= 'A' && ch <= 'Z' || ch >= 'a' && ch <= 'z') {tval[tlen++] = (char)ch; NextCh(); state = 1; break;}
+					recEnd = pos; recKind = 1;
+					if (ch >= '0' && ch <= '9' || ch >= 'A' && ch <= 'Z' || ch >= 'a' && ch <= 'z') {AddCh(); state = 1; break;}
 					else {t.kind = 1; t.val = new String(tval, 0, tlen); CheckLiteral(); return t;}
 				case 2:
-					if (ch >= '0' && ch <= '9') {tval[tlen++] = (char)ch; NextCh(); state = 2; break;}
-					else {t.kind = 2; done = true; break;}
+					recEnd = pos; recKind = 2;
+					if (ch >= '0' && ch <= '9') {AddCh(); state = 2; break;}
+					else {t.kind = 2; break loop;}
 				case 3:
-					{t.kind = 4; done = true; break;}
+					{t.kind = 4; break loop;}
 				case 4:
-					{t.kind = 5; done = true; break;}
+					{t.kind = 5; break loop;}
 				case 5:
-					{t.kind = 6; done = true; break;}
+					{t.kind = 6; break loop;}
 				case 6:
-					{t.kind = 9; done = true; break;}
+					{t.kind = 9; break loop;}
 				case 7:
-					{t.kind = 10; done = true; break;}
+					{t.kind = 10; break loop;}
 				case 8:
-					if (ch == '=') {tval[tlen++] = (char)ch; NextCh(); state = 9; break;}
-					else {t.kind = noSym; done = true; break;}
+					if (ch == '=') {AddCh(); state = 9; break;}
+					else {state = 0; break;}
 				case 9:
-					{t.kind = 16; done = true; break;}
+					{t.kind = 16; break loop;}
 				case 10:
-					{t.kind = 17; done = true; break;}
+					{t.kind = 17; break loop;}
 				case 11:
-					if (ch == ')') {tval[tlen++] = (char)ch; NextCh(); state = 12; break;}
-					else {t.kind = noSym; done = true; break;}
+					if (ch == ')') {AddCh(); state = 12; break;}
+					else {state = 0; break;}
 				case 12:
-					{t.kind = 20; done = true; break;}
+					{t.kind = 20; break loop;}
 				case 13:
-					{t.kind = 23; done = true; break;}
+					{t.kind = 23; break loop;}
 				case 14:
-					{t.kind = 24; done = true; break;}
+					{t.kind = 24; break loop;}
 				case 15:
-					{t.kind = 25; done = true; break;}
+					{t.kind = 25; break loop;}
 				case 16:
-					{t.kind = 26; done = true; break;}
+					{t.kind = 26; break loop;}
 				case 17:
-					{t.kind = 27; done = true; break;}
+					{t.kind = 27; break loop;}
 				case 18:
-					if (ch == '&') {tval[tlen++] = (char)ch; NextCh(); state = 19; break;}
-					else {t.kind = noSym; done = true; break;}
+					if (ch == '&') {AddCh(); state = 19; break;}
+					else {state = 0; break;}
 				case 19:
-					{t.kind = 28; done = true; break;}
+					{t.kind = 28; break loop;}
 				case 20:
-					if (ch >= '0' && ch <= '9' || ch >= 'A' && ch <= 'Z' || ch >= 'a' && ch <= 'd' || ch >= 'f' && ch <= 'z') {tval[tlen++] = (char)ch; NextCh(); state = 1; break;}
-					else if (ch == 'e') {tval[tlen++] = (char)ch; NextCh(); state = 21; break;}
+					recEnd = pos; recKind = 1;
+					if (ch >= '0' && ch <= '9' || ch >= 'A' && ch <= 'Z' || ch >= 'a' && ch <= 'd' || ch >= 'f' && ch <= 'z') {AddCh(); state = 1; break;}
+					else if (ch == 'e') {AddCh(); state = 21; break;}
 					else {t.kind = 1; t.val = new String(tval, 0, tlen); CheckLiteral(); return t;}
 				case 21:
-					if (ch >= '0' && ch <= '9' || ch >= 'A' && ch <= 'Z' || ch >= 'b' && ch <= 'z') {tval[tlen++] = (char)ch; NextCh(); state = 1; break;}
-					else if (ch == 'a') {tval[tlen++] = (char)ch; NextCh(); state = 22; break;}
+					recEnd = pos; recKind = 1;
+					if (ch >= '0' && ch <= '9' || ch >= 'A' && ch <= 'Z' || ch >= 'b' && ch <= 'z') {AddCh(); state = 1; break;}
+					else if (ch == 'a') {AddCh(); state = 22; break;}
 					else {t.kind = 1; t.val = new String(tval, 0, tlen); CheckLiteral(); return t;}
 				case 22:
-					if (ch >= '0' && ch <= '9' || ch >= 'A' && ch <= 'Z' || ch >= 'a' && ch <= 'c' || ch >= 'e' && ch <= 'z') {tval[tlen++] = (char)ch; NextCh(); state = 1; break;}
-					else if (ch == 'd') {tval[tlen++] = (char)ch; NextCh(); state = 23; break;}
+					recEnd = pos; recKind = 1;
+					if (ch >= '0' && ch <= '9' || ch >= 'A' && ch <= 'Z' || ch >= 'a' && ch <= 'c' || ch >= 'e' && ch <= 'z') {AddCh(); state = 1; break;}
+					else if (ch == 'd') {AddCh(); state = 23; break;}
 					else {t.kind = 1; t.val = new String(tval, 0, tlen); CheckLiteral(); return t;}
 				case 23:
-					if (ch >= '0' && ch <= '9' || ch >= 'A' && ch <= 'Z' || ch >= 'a' && ch <= 'z') {tval[tlen++] = (char)ch; NextCh(); state = 1; break;}
-					else if (ch == '(') {tval[tlen++] = (char)ch; NextCh(); state = 11; break;}
+					recEnd = pos; recKind = 1;
+					if (ch >= '0' && ch <= '9' || ch >= 'A' && ch <= 'Z' || ch >= 'a' && ch <= 'z') {AddCh(); state = 1; break;}
+					else if (ch == '(') {AddCh(); state = 11; break;}
 					else {t.kind = 1; t.val = new String(tval, 0, tlen); CheckLiteral(); return t;}
 
 			}
 		}
 		t.val = new String(tval, 0, tlen);
 		return t;
+	}
+	
+	private void SetScannerBehindT() {
+		buffer.setPos(t.pos);
+		NextCh();
+		line = t.line; col = t.col; charPos = t.charPos;
+		for (int i = 0; i < tlen; i++) NextCh();
 	}
 	
 	// get the next token (possibly a token already seen during peeking)
@@ -468,4 +502,3 @@ public class Scanner {
 	public void ResetPeek () { pt = tokens; }
 
 } // end Scanner
-

@@ -64,7 +64,7 @@ private void updateContext(int newCurrent, int newExpected) {
 }
 
 private boolean isCurrentContextValid(int previousType, int expected) {
-	if (!(this.currentType == expected || this.currentType == UNDEFINED)) {
+	if (!(this.currentType == this.expected || this.currentType == UNDEFINED)) {
 		printer.print("Incorrect context");
 		this.SemErr("unexpected operation type");
 	}
@@ -85,6 +85,7 @@ private void enterParenthesis(int currentContextType) {
 	this.expected = UNDEFINED;
 	this.lastType = UNDEFINED;
 	this.contextStack.push(this.currentContext);
+	this.currentContext = new Context(this.currentType, this.expected, CodeGenerator.ops.NOP);
 }
 
 private void exitParenthesis() {
@@ -113,7 +114,7 @@ private boolean storeNewVariable(String name, int type) {
 		}
 		else {
 			// Ok, add variable
-			int address = this.generator.allocate(type);
+			int address = this.generator.allocate();
 			this.table.add(name, type, address);
 			// @SLX: DONE
 		}
@@ -123,13 +124,28 @@ private boolean storeNewVariable(String name, int type) {
 
 // Check if a type is within expected parameters
 private boolean isExpected(int type) {
-	boolean unexpected = (expected != type && expected != UNDEFINED);
+	boolean unexpected = (this.expected != type && this.expected != UNDEFINED);
 	if (unexpected) {
 		// Incompatible types
 		printer.print("Error: incompatible types, got integer, expected: " + expected);
 		this.SemErr("type mismatch");
 	}
 	return unexpected;
+}
+
+private void checkInteger(String value) {
+	int val = Integer.MAX_VALUE;
+	try {
+		val = Integer.valueOf(value);
+	}
+	catch (NumberFormatException e) {
+		// Number is too large
+		this.SemErr("overflow: integer is too large");
+	}
+	
+	this.lastType = INTEGER;
+	this.isExpected(INTEGER);
+	this.generator.push(val);
 }
 
 public Parser(Scanner s, Printer p) {
@@ -151,12 +167,14 @@ PRODUCTIONS
 
 Grammar			(. 
 					stack.push(UNDEFINED); // Set dummy value for stack bottom
+					this.currentContext = new Context(0, 0, CodeGenerator.ops.NOP);
 					printer.startProduction("Grammar"); 
 				.)
 =
 MainFuncDecl
 EOF				(. 
 					printer.print("Table: " + table.toString());
+					this.generator.halt();
 					printer.endProduction("Grammar");
 				.)
 .
@@ -185,9 +203,11 @@ VarDecl			(. printer.startProduction("VarDecl"); .)
 Type
 identifier		(.
 					printer.print("id: " + t.val);
-					this.storeNewVariable(t.val, stack.peek());
+					this.storeNewVariable(t.val, this.currentContext.expected);
 				.)
-";"				// New variable declared
+";"				(.
+					this.resetContext();
+				.)
 VarDecl			(. printer.endProduction("VarDecl"); .)
 |
 				(. 
@@ -294,14 +314,17 @@ StatementList
 IdAccess
 ":="			(.
 					this.currentContext.previousOp = CodeGenerator.ops.ASG;
+					this.enterParenthesis(this.currentType);
 				.)
 Expr			(.
-					if (this.lastType == expected) {
+					if (this.lastType == this.expected) {
 						this.generator.commandAssignment();
 					}
 				.)
 ";"				(. 
-					expected = UNDEFINED;
+					this.exitParenthesis();
+
+					this.resetContext();
 					printer.endProduction("Statement"); 
 				.)
 .
@@ -357,9 +380,7 @@ IdAccess		(.printer.endProduction("BaseExpr");.)
 |
 integer			(. 	
 					printer.print(t.val);
-					this.lastType = INTEGER;
-					this.isExpected(INTEGER);
-					this.generator.push(Integer.valueOf(t.val));
+					this.checkInteger(t.val);
 					printer.endProduction("BaseExpr");
 				 .)
 |
@@ -391,17 +412,15 @@ integer			(.
 IdAccess		(. printer.startProduction("IdAccess"); .) // Try to access a variable
 =
 identifier		(. 
-					if (table.exists(t.val)) {
+					if (this.table.exists(t.val)) {
 						// id is in table, fetch it to the stack
 						this.generator.commandLoad(this.table.addressOf(t.val));
 						printer.print("id found: " + t.val);
-						if (la.val.equals(":=")) {
+						if (this.la.val.equals(":=")) {
 							// Assignment coming up
-							this.currentType = table.typeOf(t.val);
+							this.currentType = this.table.typeOf(t.val);
 						}
-						else {
-							this.lastType = this.table.typeOf(t.val);
-						}
+						this.lastType = this.table.typeOf(t.val);
 					}
 					else {
 						printer.print("id not found: " + t.val);
@@ -437,8 +456,7 @@ op				(. printer.startProduction("op");
 					printer.print(la.val); .)
 =
 "+"				(. 
-					if (!isCurrentContextValid(INTEGER)) {
-						this.SemErr("");
+					if (!isCurrentContextValid(INTEGER)) {	
 					}
 					this.updateContext(INTEGER, INTEGER);
 					this.currentContext.previousOp = CodeGenerator.ops.ADD;
