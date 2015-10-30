@@ -10,10 +10,10 @@ public class Parser {
 	public static final int _EOF = 0;
 	public static final int _identifier = 1;
 	public static final int _integer = 2;
-	public static final int maxT = 29;
+	public static final int maxT = 27;
 
-	static final boolean T = true;
-	static final boolean x = false;
+	static final boolean _T = true;
+	static final boolean _x = false;
 	static final int minErrDist = 2;
 
 	public Token t;    // last recognized token
@@ -63,7 +63,7 @@ private String id;
 private int expected = UNDEFINED; // Type of token expected next
 private int lastType = UNDEFINED; // Type of token last processed
 private int currentType = UNDEFINED; // Token type to be returned from current indentation
-private boolean afterOperator = false; // 
+private boolean afterOperator = false; //
 private int previousOp;
 
 private String out;
@@ -129,7 +129,7 @@ private boolean storeNewVariable(String name, int type) {
 	else {
 		if (taken) {
 			// Error, variable already declared
-			this.SemErr("a variable by that name already exists");	
+			this.SemErr("a variable by that name already exists");
 		}
 		else {
 			// Ok, add variable
@@ -161,7 +161,7 @@ private void checkInteger(String value) {
 		// Number is too large
 		this.SemErr("overflow: integer is too large");
 	}
-	
+
 	this.lastType = INTEGER;
 	this.isExpected(INTEGER);
 	this.generator.push(val);
@@ -235,7 +235,7 @@ public Parser(Scanner s, Printer p) {
 	void Grammar() {
 		stack.push(UNDEFINED); // Set dummy value for stack bottom
 		this.currentContext = new Context(0, 0, CodeGenerator.ops.NOP);
-		printer.startProduction("Grammar"); 
+		printer.startProduction("Grammar");
 		
 		MainFuncDecl();
 		Expect(0);
@@ -267,7 +267,7 @@ public Parser(Scanner s, Printer p) {
 
 	void VarDecl() {
 		printer.startProduction("VarDecl"); 
-		if (la.kind == 21 || la.kind == 22) {
+		if (la.kind == 20 || la.kind == 21) {
 			Type();
 			Expect(1);
 			printer.print("id: " + t.val);
@@ -280,9 +280,9 @@ public Parser(Scanner s, Printer p) {
 			printer.endProduction("VarDecl"); 
 		} else if (StartOf(1)) {
 			printer.print("_");
-			printer.endProduction("VarDecl"); 
+			printer.endProduction("VarDecl");
 			
-		} else SynErr(30);
+		} else SynErr(28);
 	}
 
 	void StatementList() {
@@ -293,7 +293,7 @@ public Parser(Scanner s, Printer p) {
 			printer.endProduction("StatementList"); 
 		} else if (la.kind == 5 || la.kind == 7) {
 			printer.endProduction("StatementList"); 
-		} else SynErr(31);
+		} else SynErr(29);
 	}
 
 	void ReturnStatement() {
@@ -306,9 +306,9 @@ public Parser(Scanner s, Printer p) {
 	}
 
 	void Type() {
-		printer.startProduction("Type"); 
+		printer.startProduction("Type");
 		
-		if (la.kind == 21) {
+		if (la.kind == 20) {
 			Get();
 			printer.print("Type: " + t.val);
 			printer.print("Next: " + la.val);
@@ -316,14 +316,14 @@ public Parser(Scanner s, Printer p) {
 			this.currentContext.expected = INTEGER;
 			printer.endProduction("Type");
 			
-		} else if (la.kind == 22) {
+		} else if (la.kind == 21) {
 			Get();
 			printer.print("Type: " + t.val);
 			this.expected = BOOLEAN;
 			this.currentContext.expected = BOOLEAN;
 			printer.endProduction("Type");
 			
-		} else SynErr(32);
+		} else SynErr(30);
 	}
 
 	void Statement() {
@@ -353,19 +353,12 @@ public Parser(Scanner s, Printer p) {
 			printer.print("then");
 			
 			Statement();
-			Expect(12);
-			this.generator.startElse();
-			printer.print("else");
-			// @SLX: log current line of SLX program and make a conditional jump to here
-			
-			Statement();
-			Expect(13);
 			this.generator.startFi();
 			printer.print("fi");
 			expected = UNDEFINED;
-			printer.endProduction("Statement"); 
+			printer.endProduction("Statement");
 			
-		} else if (la.kind == 14) {
+		} else if (la.kind == 12) {
 			Get();
 			printer.print("while");
 			stack.push(BOOLEAN);
@@ -390,7 +383,7 @@ public Parser(Scanner s, Printer p) {
 			printer.endProduction("Statement");
 			this.generator.endWhileBody();
 			
-		} else if (la.kind == 15) {
+		} else if (la.kind == 13) {
 			Get();
 			printer.print("print");
 			Expect(9);
@@ -399,17 +392,17 @@ public Parser(Scanner s, Printer p) {
 			this.generator.commandPrint();
 			
 			Expect(6);
-			printer.endProduction("Statement"); 
+			printer.endProduction("Statement");
 			
 		} else if (la.kind == 4) {
 			Get();
 			StatementList();
 			Expect(5);
-			printer.endProduction("Statement"); 
+			printer.endProduction("Statement");
 			
 		} else if (la.kind == 1) {
 			IdAccess();
-			Expect(16);
+			Expect(14);
 			this.currentContext.previousOp = CodeGenerator.ops.ASG;
 			this.enterParenthesis(this.currentType);
 			
@@ -417,17 +410,20 @@ public Parser(Scanner s, Printer p) {
 			if (this.lastType == this.expected) {
 			this.generator.commandAssignment();
 			}
+			              else {
+			                  SemErr("Type mismatch in assignment: " + this.expected + " </- " + this.lastType);
+			              }
 			
 			Expect(6);
 			this.exitParenthesis();
 			this.resetContext();
-			printer.endProduction("Statement"); 
+			printer.endProduction("Statement");
 			
-		} else SynErr(33);
+		} else SynErr(31);
 	}
 
 	void Expr() {
-		printer.startProduction("Expr"); 
+		printer.startProduction("Expr");
 		
 		if (StartOf(3)) {
 			BaseExpr();
@@ -438,10 +434,10 @@ public Parser(Scanner s, Printer p) {
 				printer.endProduction("Expr");
 			} else if (la.kind == 6 || la.kind == 10) {
 				printer.endProduction("Expr");
-			} else SynErr(34);
-		} else if (la.kind == 17) {
+			} else SynErr(32);
+		} else if (la.kind == 15) {
 			Get();
-			printer.print("!"); 
+			printer.print("!");
 			this.expected = BOOLEAN;
 			// @SLX: Negation here
 			
@@ -454,7 +450,22 @@ public Parser(Scanner s, Printer p) {
 			this.generator.commandNegation();
 			}
 			
-		} else SynErr(35);
+		} else if (la.kind == 16) {
+			Get();
+			printer.print("-");
+			this.expected = INTEGER;
+			// @SLX: Minus here
+			
+			BaseExpr();
+			if (this.lastType != INTEGER) {
+			   // Error, minus of non-integer
+			   this.SemErr("trying to take negative of non-integer");
+			}
+			else {
+			   this.generator.commandMinus();
+			}
+			
+		} else SynErr(33);
 	}
 
 	void IdAccess() {
@@ -474,8 +485,7 @@ public Parser(Scanner s, Printer p) {
 		printer.print("id not found: " + t.val);
 		this.SemErr("no variable named " + t.val);
 		}
-		
-		printer.endProduction("IdAccess"); 
+			printer.endProduction("IdAccess"); 
 	}
 
 	void BaseExpr() {
@@ -506,27 +516,27 @@ public Parser(Scanner s, Printer p) {
 			
 			break;
 		}
-		case 18: {
+		case 17: {
 			Get();
 			printer.print(t.val);
 			this.lastType = BOOLEAN;
 			this.isExpected(BOOLEAN);
 			this.generator.push(1);
-			printer.endProduction("BaseExpr"); 
+			printer.endProduction("BaseExpr");
 			
 			break;
 		}
-		case 19: {
+		case 18: {
 			Get();
 			printer.print(t.val);
 			this.lastType = BOOLEAN;
 			this.isExpected(BOOLEAN);
 			this.generator.push(0);
-			printer.endProduction("BaseExpr"); 
+			printer.endProduction("BaseExpr");
 			
 			break;
 		}
-		case 20: {
+		case 19: {
 			Get();
 			this.lastType = INTEGER;
 			this.isExpected(INTEGER);
@@ -534,7 +544,7 @@ public Parser(Scanner s, Printer p) {
 			
 			break;
 		}
-		default: SynErr(36); break;
+		default: SynErr(34); break;
 		}
 	}
 
@@ -542,72 +552,72 @@ public Parser(Scanner s, Printer p) {
 		printer.startProduction("op");
 		printer.print(la.val); 
 		switch (la.kind) {
-		case 23: {
+		case 22: {
 			Get();
-			if (!isCurrentContextValid(INTEGER)) {	
+			if (!isCurrentContextValid(INTEGER)) {
 			}
 			this.updateContext(INTEGER, INTEGER);
 			this.currentContext.previousOp = CodeGenerator.ops.ADD;
-			printer.endProduction("op"); 
+			printer.endProduction("op");
 			
 			break;
 		}
-		case 24: {
+		case 16: {
 			Get();
 			if (!isCurrentContextValid(INTEGER)) {
 			// @SLX: SUB
 			}
 			this.updateContext(INTEGER, INTEGER);
 			this.currentContext.previousOp = CodeGenerator.ops.SUB;
-			printer.endProduction("op"); 
+			printer.endProduction("op");
 			
 			break;
 		}
-		case 25: {
+		case 23: {
 			Get();
 			if (!isCurrentContextValid(INTEGER)) {
 			// @SLX: MUL
 			}
 			this.updateContext(INTEGER, INTEGER);
 			this.currentContext.previousOp = CodeGenerator.ops.MUL;
-			printer.endProduction("op"); 
+			printer.endProduction("op");
 			
 			break;
 		}
-		case 26: {
+		case 24: {
 			Get();
 			if (!isCurrentContextValid(INTEGER)) {
 			// @SLX: DIV
 			}
 			this.updateContext(INTEGER, INTEGER);
 			this.currentContext.previousOp = CodeGenerator.ops.DIV;
-			printer.endProduction("op"); 
+			printer.endProduction("op");
 			
 			break;
 		}
-		case 27: {
+		case 25: {
 			Get();
 			if (!isCurrentContextValid(INTEGER, BOOLEAN)) {
 			// @SLX: LESS_THAN
 			}
 			this.updateContext(BOOLEAN, INTEGER);
 			this.currentContext.previousOp = CodeGenerator.ops.LSS;
-			printer.endProduction("op"); 
+			printer.endProduction("op");
 			
 			break;
 		}
-		case 28: {
+		case 26: {
 			Get();
 			if (!isCurrentContextValid(BOOLEAN)) {
 			// @SLX: AND
 			}
 			this.updateContext(BOOLEAN, BOOLEAN);
 			this.currentContext.previousOp = CodeGenerator.ops.AND;
-			printer.endProduction("op"); 
+			printer.endProduction("op");
 			
 			break;
 		}
-		default: SynErr(37); break;
+		default: SynErr(35); break;
 		}
 	}
 
@@ -623,11 +633,11 @@ public Parser(Scanner s, Printer p) {
 	}
 
 	private static final boolean[][] set = {
-		{T,x,x,x, x,x,x,x, x,x,x,x, x,x,x,x, x,x,x,x, x,x,x,x, x,x,x,x, x,x,x},
-		{x,T,x,x, T,x,x,T, T,x,x,x, x,x,T,T, x,x,x,x, x,x,x,x, x,x,x,x, x,x,x},
-		{x,T,x,x, T,x,x,x, T,x,x,x, x,x,T,T, x,x,x,x, x,x,x,x, x,x,x,x, x,x,x},
-		{x,T,T,x, x,x,x,x, x,T,x,x, x,x,x,x, x,x,T,T, T,x,x,x, x,x,x,x, x,x,x},
-		{x,x,x,x, x,x,x,x, x,x,x,x, x,x,x,x, x,x,x,x, x,x,x,T, T,T,T,T, T,x,x}
+		{_T,_x,_x,_x, _x,_x,_x,_x, _x,_x,_x,_x, _x,_x,_x,_x, _x,_x,_x,_x, _x,_x,_x,_x, _x,_x,_x,_x, _x},
+		{_x,_T,_x,_x, _T,_x,_x,_T, _T,_x,_x,_x, _T,_T,_x,_x, _x,_x,_x,_x, _x,_x,_x,_x, _x,_x,_x,_x, _x},
+		{_x,_T,_x,_x, _T,_x,_x,_x, _T,_x,_x,_x, _T,_T,_x,_x, _x,_x,_x,_x, _x,_x,_x,_x, _x,_x,_x,_x, _x},
+		{_x,_T,_T,_x, _x,_x,_x,_x, _x,_T,_x,_x, _x,_x,_x,_x, _x,_T,_T,_T, _x,_x,_x,_x, _x,_x,_x,_x, _x},
+		{_x,_x,_x,_x, _x,_x,_x,_x, _x,_x,_x,_x, _x,_x,_x,_x, _T,_x,_x,_x, _x,_x,_T,_T, _T,_T,_T,_x, _x}
 
 	};
 } // end Parser
@@ -656,40 +666,38 @@ class Errors {
 			case 1: s = "identifier expected"; break;
 			case 2: s = "integer expected"; break;
 			case 3: s = "\"main\" expected"; break;
-			case 4: s = "\"{\" expected"; break;
-			case 5: s = "\"}\" expected"; break;
+			case 4: s = "\"begin\" expected"; break;
+			case 5: s = "\"end\" expected"; break;
 			case 6: s = "\";\" expected"; break;
 			case 7: s = "\"return\" expected"; break;
 			case 8: s = "\"if\" expected"; break;
 			case 9: s = "\"(\" expected"; break;
 			case 10: s = "\")\" expected"; break;
 			case 11: s = "\"then\" expected"; break;
-			case 12: s = "\"else\" expected"; break;
-			case 13: s = "\"fi\" expected"; break;
-			case 14: s = "\"while\" expected"; break;
-			case 15: s = "\"print\" expected"; break;
-			case 16: s = "\":=\" expected"; break;
-			case 17: s = "\"!\" expected"; break;
-			case 18: s = "\"true\" expected"; break;
-			case 19: s = "\"false\" expected"; break;
-			case 20: s = "\"read()\" expected"; break;
-			case 21: s = "\"int\" expected"; break;
-			case 22: s = "\"boolean\" expected"; break;
-			case 23: s = "\"+\" expected"; break;
-			case 24: s = "\"-\" expected"; break;
-			case 25: s = "\"*\" expected"; break;
-			case 26: s = "\"/\" expected"; break;
-			case 27: s = "\"<\" expected"; break;
-			case 28: s = "\"&&\" expected"; break;
-			case 29: s = "??? expected"; break;
-			case 30: s = "invalid VarDecl"; break;
-			case 31: s = "invalid StatementList"; break;
-			case 32: s = "invalid Type"; break;
-			case 33: s = "invalid Statement"; break;
-			case 34: s = "invalid Expr"; break;
-			case 35: s = "invalid Expr"; break;
-			case 36: s = "invalid BaseExpr"; break;
-			case 37: s = "invalid op"; break;
+			case 12: s = "\"while\" expected"; break;
+			case 13: s = "\"print\" expected"; break;
+			case 14: s = "\"<-\" expected"; break;
+			case 15: s = "\"!\" expected"; break;
+			case 16: s = "\"-\" expected"; break;
+			case 17: s = "\"true\" expected"; break;
+			case 18: s = "\"false\" expected"; break;
+			case 19: s = "\"read()\" expected"; break;
+			case 20: s = "\"int\" expected"; break;
+			case 21: s = "\"boolean\" expected"; break;
+			case 22: s = "\"+\" expected"; break;
+			case 23: s = "\"*\" expected"; break;
+			case 24: s = "\"/\" expected"; break;
+			case 25: s = "\"<\" expected"; break;
+			case 26: s = "\"&&\" expected"; break;
+			case 27: s = "??? expected"; break;
+			case 28: s = "invalid VarDecl"; break;
+			case 29: s = "invalid StatementList"; break;
+			case 30: s = "invalid Type"; break;
+			case 31: s = "invalid Statement"; break;
+			case 32: s = "invalid Expr"; break;
+			case 33: s = "invalid Expr"; break;
+			case 34: s = "invalid BaseExpr"; break;
+			case 35: s = "invalid op"; break;
 			default: s = "error " + n; break;
 		}
 		printMsg(line, col, s);

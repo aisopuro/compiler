@@ -1,7 +1,7 @@
-main {
+main begin
   boolean a;
-  a := false;
+  a <- false;
   print( ! a);
   return a;
-}
+end
 

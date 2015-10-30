@@ -1,26 +1,16 @@
-main {
+main begin
   boolean a;
   boolean b;
-  a := true;
-  b := false;
+  a <- true;
+  b <- false;
   if (a && b) then
-  {
+  begin
     print(1);
-  }
-  else
-  {
+  end
+  if (!(a && b)) then
+  begin
     print(0);
-  }
-  fi
-  
-  if (((1 + 3) < (4 + 5)) && ((2 < 4) && (6 < 1))) then {
-  	a := b;
-  }
-  else {
-  	b := a;
-  }
-  fi
-  
+  end
   return a;
-}
+end
 

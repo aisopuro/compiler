@@ -73,26 +73,26 @@ public class CodeGenerator {
 		}
 		else if (opType == ops.SUB) {
 			// Subtract
-                    this.assembler.emit(CommandWord.SUB);
+            this.assembler.emit(CommandWord.SUB);
 		}
 		else if (opType == ops.MUL) {
 			// Multiply
-                    this.assembler.emit(CommandWord.MUL);
+            this.assembler.emit(CommandWord.MUL);
 		}
 		else if (opType == ops.DIV) {
 			// Divide
-                    this.assembler.emit(CommandWord.DIV);
+            this.assembler.emit(CommandWord.DIV);
 		}
 		else if (opType == ops.LSS) {
 			// Less than
-                    this.assembler.emit(CommandWord.RLT);
+            this.assembler.emit(CommandWord.RLT);
 		}
 		else if (opType == ops.AND) {
 			// And
 		    // (pop == true) == pop
-                    this.assembler.emit(CommandWord.ENT, 1);
-                    this.assembler.emit(CommandWord.REQ);
-                    this.assembler.emit(CommandWord.REQ);
+            this.assembler.emit(CommandWord.ENT, 1);
+            this.assembler.emit(CommandWord.REQ);
+            this.assembler.emit(CommandWord.REQ);
 		}
 		else {
 			// NOP
@@ -159,5 +159,11 @@ public class CodeGenerator {
 
 	public void printProgram() {
 		System.out.println(this.assembler.toString());
+	}
+
+	public void commandMinus() {
+		// -x == 0 - x
+		this.assembler.emit(CommandWord.ENT, 0);
+		this.assembler.emit(CommandWord.SUB);
 	}
 }

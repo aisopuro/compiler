@@ -1,11 +1,10 @@
-main {
+main begin
   if (3) then
   print(3);
 
-  else
+  if (!(3)) then
   print(0);
 
-  fi
   return 3;
-}
+end
 

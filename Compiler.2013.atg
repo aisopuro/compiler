@@ -188,11 +188,11 @@ FuncBody		(. printer.endProduction("MainFuncDecl"); .)
 
 FuncBody		(. printer.startProduction("FuncBody"); .)
 =
-"begin"				(.  .)
+"{"				(.  .)
 VarDecl
 StatementList
 ReturnStatement
-"end"				(.
+"}"				(.
 
 					printer.endProduction("FuncBody");
 				.)
@@ -256,7 +256,14 @@ Expr
 					this.generator.startThen();
 					printer.print("then");
 				.)
-Statement	    (.
+Statement
+"else"			(.
+					this.generator.startElse();
+					printer.print("else");
+				// @SLX: log current line of SLX program and make a conditional jump to here
+				.)
+Statement
+"fi"			(.
 					this.generator.startFi();
 					printer.print("fi");
 					expected = UNDEFINED;
@@ -298,14 +305,14 @@ Expr
 					printer.endProduction("Statement");
 				.)
 |
-"begin"
+"{"
 StatementList
-"end"				(.
+"}"				(.
 					printer.endProduction("Statement");
 				.)
 |
 IdAccess
-"<-"			(.
+":="			(.
 					this.currentContext.previousOp = CodeGenerator.ops.ASG;
 					this.enterParenthesis(this.currentType);
 				.)
@@ -313,9 +320,6 @@ Expr			(.
 					if (this.lastType == this.expected) {
 						this.generator.commandAssignment();
 					}
-                    else {
-                        SemErr("Type mismatch in assignment: " + this.expected + " </- " + this.lastType);
-                    }
 				.)
 ";"				(.
 					this.exitParenthesis();
@@ -342,8 +346,8 @@ BaseExpr		(.
 )
 |
 "!"				(. printer.print("!");
-				    this.expected = BOOLEAN;
-				    // @SLX: Negation here
+				this.expected = BOOLEAN;
+				// @SLX: Negation here
 				.)
 BaseExpr		(.
 					if (this.lastType != BOOLEAN) {
@@ -354,20 +358,6 @@ BaseExpr		(.
 						this.generator.commandNegation();
 					}
 				.)
-|
-"-"             (. printer.print("-");
-                    this.expected = INTEGER;
-                    // @SLX: Minus here
-                .)
-BaseExpr        (.
-                    if (this.lastType != INTEGER) {
-                        // Error, minus of non-integer
-                        this.SemErr("trying to take negative of non-integer");
-                    }
-                    else {
-                        this.generator.commandMinus();
-                    }
-                .)
 .
 
 
@@ -467,7 +457,6 @@ op				(. printer.startProduction("op");
 =
 "+"				(.
 					if (!isCurrentContextValid(INTEGER)) {
-                        SemErr("Invalid operand for type 'integer'")
 					}
 					this.updateContext(INTEGER, INTEGER);
 					this.currentContext.previousOp = CodeGenerator.ops.ADD;

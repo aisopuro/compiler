@@ -1,6 +1,6 @@
-main {
+main begin
   int i;
-  i := true;
+  i <- true;
   return i;
-}
+end
 

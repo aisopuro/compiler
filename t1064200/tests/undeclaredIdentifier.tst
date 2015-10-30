@@ -1,5 +1,5 @@
-main {
-  x := 1;
+main begin
+  x <- 1;
   return x;
-}
+end
 

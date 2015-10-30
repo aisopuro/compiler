@@ -1,0 +1,48 @@
+Symbol Table:
+------------
+
+ nr name           typ  hasAt graph  del   line tokenKind
+  0 EOF            t    false                 0 fixedToken
+  1 identifier     t    false               161 classLitToken
+  2 integer        t    false               162 classToken
+  3 "main"         t    false               184 litToken
+  4 "begin"        t    false               191 litToken
+  5 "end"          t    false               195 litToken
+  6 ";"            t    false               208 fixedToken
+  7 "return"       t    false               229 litToken
+  8 "if"           t    false               236 litToken
+  9 "("            t    false               239 fixedToken
+ 10 ")"            t    false               243 fixedToken
+ 11 "then"         t    false               255 litToken
+ 12 "while"        t    false               266 litToken
+ 13 "print"        t    false               290 litToken
+ 14 "<-"           t    false               308 fixedToken
+ 15 "!"            t    false               344 fixedToken
+ 16 "-"            t    false               358 fixedToken
+ 17 "true"         t    false               397 litToken
+ 18 "false"        t    false               405 litToken
+ 19 "read()"       t    false               413 fixedToken
+ 20 "int"          t    false               449 litToken
+ 21 "boolean"      t    false               457 litToken
+ 22 "+"            t    false               468 fixedToken
+ 23 "*"            t    false               485 fixedToken
+ 24 "/"            t    false               494 fixedToken
+ 25 "<"            t    false               503 fixedToken
+ 26 "&&"           t    false               512 fixedToken
+ 27 ???            t    false                 0 fixedToken
+  0 Grammar        nt   false     1 false   168 fixedToken
+  1 MainFuncDecl   nt   false     4 false   182 fixedToken
+  2 FuncBody       nt   false     8 false   189 fixedToken
+  3 VarDecl        nt   false    23 true    201 fixedToken
+  4 StatementLis   nt   false    29 true    219 fixedToken
+  5 ReturnStatem   nt   false    31 false   227 fixedToken
+  6 Type           nt   false   125 false   445 fixedToken
+  7 Statement      nt   false    56 false   234 fixedToken
+  8 Expr           nt   false    91 false   331 fixedToken
+  9 IdAccess       nt   false   119 false   422 fixedToken
+ 10 BaseExpr       nt   false   105 false   376 fixedToken
+ 11 op             nt   false   131 false   465 fixedToken
+
+Literal Tokens:
+--------------
+
