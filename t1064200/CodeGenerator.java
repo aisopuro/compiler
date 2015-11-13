@@ -31,13 +31,14 @@ public class CodeGenerator {
 	private Deque<flowLabels> currentLabels = new ArrayDeque<flowLabels>(); // Stack for keeping track of if-else nesting
 	
 	private int offset = 0;
+	private int labelAddress = 0;
 
 	public CodeGenerator() {
 		this.assembler = new SlxProgram();
 	}
 
 	public int allocate() {
-		this.assembler.emit(CommandWord.ENT, 1); // No arrays, only singe numbers
+		this.assembler.emit(CommandWord.ENT, 1); // No arrays, only single numbers
 		this.assembler.emit(CommandWord.ALC);
 		return this.newAddress();
 	}
@@ -45,6 +46,31 @@ public class CodeGenerator {
 		int a = this.offset;
 		this.offset++;
 		return a;
+	}
+	
+	public int newLabel() {
+		return this.labelAddress++;
+	}
+	
+	public void emit(String word) {
+		this.assembler.emit(CommandWord.valueOf(word));
+	}
+	
+	public void emit(String word, int arg1) {
+		this.assembler.emit(CommandWord.valueOf(word), arg1);
+	}
+	
+	public void emit(String word, int arg1, int arg2) {
+		this.assembler.emit(CommandWord.valueOf(word), arg1, arg2);
+	}
+	
+	public void emitAnd() {
+		// And
+		// Construct an &&-statement
+	    // (pop == true) == pop
+        this.assembler.emit(CommandWord.ENT, 1); // Push(true)
+        this.assembler.emit(CommandWord.REQ); // pop == true?
+        this.assembler.emit(CommandWord.REQ); // pop == result?
 	}
 	
 	public void push(int value) {

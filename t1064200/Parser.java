@@ -25,29 +25,8 @@ public class Parser {
 
 	private Printer printer;
 
-private class Context {
-	public int currentType;
-	public int expected;
-	public CodeGenerator.ops previousOp;
-
-	public Context(int current, int next, CodeGenerator.ops previousOp) {
-		this.currentType = current;
-		this.expected = next;
-		this.previousOp = previousOp;
-	}
-
-	public void resetTo(int v, CodeGenerator.ops last) {
-		this.currentType = v;
-		this.expected = v;
-		this.previousOp = last;
-	}
-}
-
 private SymbolTable table = new SymbolTable();
 private CodeGenerator generator = new CodeGenerator();
-private Deque<Integer> stack = new ArrayDeque<Integer>();
-private Deque<Context> contextStack = new ArrayDeque<Context>();
-
 
 
 // Token types
@@ -57,103 +36,12 @@ private static final int BOOLEAN = INTEGER + 1;
 
 // @SLX
 
-private Context currentContext;
-
 private String id;
-private int expected = UNDEFINED; // Type of token expected next
-private int lastType = UNDEFINED; // Type of token last processed
-private int currentType = UNDEFINED; // Token type to be returned from current indentation
-private boolean afterOperator = false; //
-private int previousOp;
 
 private String out;
 
-// Reset type context
-private void resetContext() {
-	this.currentType = UNDEFINED;
-	this.expected = UNDEFINED;
-	this.lastType = UNDEFINED;
-}
-
-private void updateContext(int newCurrent, int newExpected) {
-	this.currentType = newCurrent;
-	this.expected = newExpected;
-	this.currentContext.currentType = newCurrent;
-	this.currentContext.expected = newExpected;
-}
-
-private boolean isCurrentContextValid(int previousType, int expected) {
-	if (!(this.currentType == this.expected || this.currentType == UNDEFINED)) {
-		printer.print("Incorrect context");
-		this.SemErr("unexpected operation type");
-	}
-	if (!(this.lastType == previousType)) {
-		printer.print("Incompatible type");
-		this.SemErr("unexpected type");
-	}
-	return ((this.currentType == expected || this.currentType == UNDEFINED) && this.lastType == previousType);
-}
-
-private boolean isCurrentContextValid(int expected) {
-	return isCurrentContextValid(expected, expected);
-}
-
-private void enterParenthesis(int currentContextType) {
-	this.stack.push(currentContextType);
-	this.currentType = this.expected;
-	this.expected = UNDEFINED;
-	this.lastType = UNDEFINED;
-	this.contextStack.push(this.currentContext);
-	this.currentContext = new Context(this.currentType, this.expected, CodeGenerator.ops.NOP);
-}
-
-private void exitParenthesis() {
-	this.lastType = this.currentType;
-	this.currentType = this.stack.pop();
-	this.expected = UNDEFINED;
-	this.afterOperator = false;
-	this.currentContext = this.contextStack.pop();
-	if (this.currentContext.previousOp != CodeGenerator.ops.NOP) {
-		// An operation is scheduled for the result of the parenthesis
-		this.generator.commandOp(this.currentContext.previousOp);
-	}
-}
-
-// Store new variable onto the heap
-private boolean storeNewVariable(String name, int type) {
-	boolean taken = this.table.exists(name);
-	if (this.expected == UNDEFINED) {
-		// Error, missing Type declaration
-		this.SemErr("undeclared variable type");
-	}
-	else {
-		if (taken) {
-			// Error, variable already declared
-			this.SemErr("a variable by that name already exists");
-		}
-		else {
-			// Ok, add variable
-			int address = this.generator.allocate();
-			this.table.add(name, type, address);
-			// @SLX: DONE
-		}
-	}
-	return !taken;
-}
-
-// Check if a type is within expected parameters
-private boolean isExpected(int type) {
-	boolean unexpected = (this.expected != type && this.expected != UNDEFINED);
-	if (unexpected) {
-		// Incompatible types
-		printer.print("Error: incompatible types, got integer, expected: " + expected);
-		this.SemErr("type mismatch");
-	}
-	return unexpected;
-}
-
-private void checkInteger(String value) {
-	int val = Integer.MAX_VALUE;
+private int checkInteger(String value) {
+	int val = 0;
 	try {
 		val = Integer.valueOf(value);
 	}
@@ -161,15 +49,18 @@ private void checkInteger(String value) {
 		// Number is too large
 		this.SemErr("overflow: integer is too large");
 	}
-
-	this.lastType = INTEGER;
-	this.isExpected(INTEGER);
-	this.generator.push(val);
+	return val;
 }
 
 public Parser(Scanner s, Printer p) {
        this(s);
        this.printer = p;
+}
+
+private class OpData {
+	public String cw;
+	public int expected;
+	public int result;
 }
 
 
@@ -233,8 +124,6 @@ public Parser(Scanner s, Printer p) {
 	}
 	
 	void Grammar() {
-		stack.push(UNDEFINED); // Set dummy value for stack bottom
-		this.currentContext = new Context(0, 0, CodeGenerator.ops.NOP);
 		printer.startProduction("Grammar");
 		
 		MainFuncDecl();
@@ -266,16 +155,21 @@ public Parser(Scanner s, Printer p) {
 	}
 
 	void VarDecl() {
+		int type;
 		printer.startProduction("VarDecl"); 
 		if (la.kind == 20 || la.kind == 21) {
-			Type();
+			type = Type();
+			if (type == UNDEFINED) SemErr("Incorrect type declaration");
 			Expect(1);
-			printer.print("id: " + t.val);
-			this.storeNewVariable(t.val, this.currentContext.expected);
+			String name = t.val;
+			if (this.table.exists(name)) {
+			SemErr("Double variable definition, " + name + " already exists");
+			}
+			else {
+			SymbolTable.Symbol symbol = this.table.add(name, type);
+			}
 			
 			Expect(6);
-			this.resetContext();
-			
 			VarDecl();
 			printer.endProduction("VarDecl"); 
 		} else if (StartOf(1)) {
@@ -297,99 +191,90 @@ public Parser(Scanner s, Printer p) {
 	}
 
 	void ReturnStatement() {
-		printer.startProduction("ReturnStatement"); 
+		int type; SymbolTable.Symbol symbol; printer.startProduction("ReturnStatement"); 
 		Expect(7);
 		printer.print("return"); 
-		Expr();
+		type = Expr();
 		Expect(6);
 		printer.endProduction("ReturnStatement"); 
 	}
 
-	void Type() {
+	int  Type() {
+		int  type;
+		type = UNDEFINED;
 		printer.startProduction("Type");
 		
 		if (la.kind == 20) {
 			Get();
 			printer.print("Type: " + t.val);
 			printer.print("Next: " + la.val);
-			this.expected = INTEGER;
-			this.currentContext.expected = INTEGER;
+			type = INTEGER;
 			printer.endProduction("Type");
 			
 		} else if (la.kind == 21) {
 			Get();
 			printer.print("Type: " + t.val);
-			this.expected = BOOLEAN;
-			this.currentContext.expected = BOOLEAN;
+			type = BOOLEAN;
 			printer.endProduction("Type");
 			
 		} else SynErr(30);
+		return type;
 	}
 
 	void Statement() {
+		int type; SymbolTable.Symbol symbol;
 		printer.startProduction("Statement"); 
 		if (la.kind == 8) {
 			Get();
-			this.generator.startIf();
-			
 			Expect(9);
-			this.enterParenthesis(BOOLEAN);
-			
-			Expr();
+			type = Expr();
 			Expect(10);
-			if (this.currentType != BOOLEAN) {
+			if (type != BOOLEAN) {
 			// ERROR, non-boolean expression in conditional
-			printer.print("Error in if-statement: " + this.currentType);
-			this.SemErr("incorrect if-declaration");
+			this.SemErr("incorrect if-declaration: expected boolean expression");
 			}
 			else {
 			printer.print("if ok");
 			}
-			this.exitParenthesis();
-			this.resetContext();
+			int ifEndLabel = this.generator.newLabel();
+			this.generator.emit("JZE", ifEndLabel);
 			
 			Expect(11);
-			this.generator.startThen();
 			printer.print("then");
 			
 			Statement();
-			this.generator.startFi();
 			printer.print("fi");
-			expected = UNDEFINED;
+			this.generator.emit("LAB", ifEndLabel);
 			printer.endProduction("Statement");
 			
 		} else if (la.kind == 12) {
 			Get();
 			printer.print("while");
-			stack.push(BOOLEAN);
-			this.generator.startWhile();
+			int whileEndLabel = this.generator.newLabel();
 			
 			Expect(9);
-			this.enterParenthesis(BOOLEAN);
-			Expr();
+			type = Expr();
 			Expect(10);
-			if (stack.peek() != BOOLEAN) {
+			if (type != BOOLEAN) {
 			// ERROR, non-boolean expression
-			this.SemErr("incorrect while-declaration");
+			this.SemErr("incorrect while-declaration: expected boolean expression");
 			}
 			else {
-				printer.print("while ok");
+			printer.print("while ok");
 			}
-			this.generator.endWhileConditional();
-			this.exitParenthesis();
-			this.resetContext();
+			this.generator.emit("JZE", whileEndLabel);
 			
 			Statement();
 			printer.endProduction("Statement");
-			this.generator.endWhileBody();
+			this.generator.emit("LAB", whileEndLabel);
 			
 		} else if (la.kind == 13) {
 			Get();
 			printer.print("print");
 			Expect(9);
-			Expr();
+			type = Expr();
 			Expect(10);
-			this.generator.commandPrint();
+			this.generator.emit("WRI");
 			
 			Expect(6);
 			printer.endProduction("Statement");
@@ -401,117 +286,127 @@ public Parser(Scanner s, Printer p) {
 			printer.endProduction("Statement");
 			
 		} else if (la.kind == 1) {
-			IdAccess();
+			symbol = IdAccess();
 			Expect(14);
-			this.currentContext.previousOp = CodeGenerator.ops.ASG;
-			this.enterParenthesis(this.currentType);
-			
-			Expr();
-			if (this.lastType == this.expected) {
-			this.generator.commandAssignment();
+			type = Expr();
+			if (symbol.type == type) {
+			this.generator.emit("STL");
 			}
 			              else {
-			                  SemErr("Type mismatch in assignment: " + this.expected + " </- " + this.lastType);
+			                  SemErr("Type mismatch in assignment: " + symbol.type + " </- " + type);
 			              }
 			
 			Expect(6);
-			this.exitParenthesis();
-			this.resetContext();
 			printer.endProduction("Statement");
 			
 		} else SynErr(31);
 	}
 
-	void Expr() {
+	int  Expr() {
+		int  type;
+		type = UNDEFINED;
+		int type1 = UNDEFINED;
+		int type2 = UNDEFINED;
+		OpData op;
 		printer.startProduction("Expr");
 		
 		if (StartOf(3)) {
-			BaseExpr();
+			type1 = BaseExpr();
+			type = type1; 
 			if (StartOf(4)) {
-				op();
-				BaseExpr();
-				this.generator.commandOp(this.currentContext.previousOp);
+				op = op();
+				if (type1 != op.expected) {
+				SemErr("Unexpected type for " + op.cw);
+				}
+				type = op.result;
+				
+				type2 = BaseExpr();
+				if (type2 != op.expected) {
+				SemErr("Unexpected type for " + op.cw);
+				}
+				if (op.cw == "AND") {
+				this.generator.emitAnd();
+				}
+				else {
+				this.generator.emit(op.cw);
+				}
 				printer.endProduction("Expr");
 			} else if (la.kind == 6 || la.kind == 10) {
 				printer.endProduction("Expr");
 			} else SynErr(32);
 		} else if (la.kind == 15) {
 			Get();
-			printer.print("!");
-			this.expected = BOOLEAN;
-			// @SLX: Negation here
-			
-			BaseExpr();
-			if (this.lastType != BOOLEAN) {
+			printer.print("!"); 
+			type = BaseExpr();
+			if (type != BOOLEAN) {
 			// Error, negating non-boolean
-			this.SemErr("trying to negate non-boolean");
+			this.SemErr("Trying to negate non-boolean expression");
 			}
 			else {
-			this.generator.commandNegation();
+			this.generator.emit("NOT");
 			}
 			
 		} else if (la.kind == 16) {
 			Get();
-			printer.print("-");
-			this.expected = INTEGER;
-			// @SLX: Minus here
-			
-			BaseExpr();
-			if (this.lastType != INTEGER) {
+			printer.print("-"); 
+			type = BaseExpr();
+			if (type != INTEGER) {
 			   // Error, minus of non-integer
 			   this.SemErr("trying to take negative of non-integer");
 			}
 			else {
-			   this.generator.commandMinus();
+			   this.generator.emit("UMN");
 			}
 			
 		} else SynErr(33);
+		return type;
 	}
 
-	void IdAccess() {
-		printer.startProduction("IdAccess"); 
+	SymbolTable.Symbol  IdAccess() {
+		SymbolTable.Symbol  symbol;
+		String name;
+		symbol = table.new Symbol("undefined", UNDEFINED);
+		
 		Expect(1);
-		if (this.table.exists(t.val)) {
-		// id is in table, fetch it to the stack
-		this.generator.commandLoad(this.table.addressOf(t.val));
-		printer.print("id found: " + t.val);
-		if (this.la.val.equals(":=")) {
-			// Assignment coming up
-			this.currentType = this.table.typeOf(t.val);
+		name = t.val;
+		try {
+			symbol = (SymbolTable.Symbol)table.get(name);
+			this.generator.emit("ENT", symbol.address);
+		} catch (SymbolTable.SymbolNotFoundException e) {
+		SemErr("Undeclared variable " + name);
 		}
-		this.lastType = this.table.typeOf(t.val);
-		}
-		else {
-		printer.print("id not found: " + t.val);
-		this.SemErr("no variable named " + t.val);
-		}
-			printer.endProduction("IdAccess"); 
+		
+		return symbol;
 	}
 
-	void BaseExpr() {
+	int  BaseExpr() {
+		int  type;
+		SymbolTable.Symbol symbol;
+		type = UNDEFINED;
 		printer.startProduction("BaseExpr");
 		switch (la.kind) {
 		case 9: {
 			Get();
-			printer.print(stack.size() + ": In with: " + currentType);
-			this.enterParenthesis(this.currentType);
 			
-			Expr();
+			type = Expr();
 			Expect(10);
-			this.exitParenthesis();
-			printer.print(stack.size() + ": Out with: " + lastType);
 			printer.endProduction("BaseExpr"); 
 			break;
 		}
 		case 1: {
-			IdAccess();
+			symbol = IdAccess();
+			this.generator.emit("LDL");
+			type = symbol.type;
 			printer.endProduction("BaseExpr");
+			
 			break;
 		}
 		case 2: {
 			Get();
 			printer.print(t.val);
-			this.checkInteger(t.val);
+			int value = this.checkInteger(t.val);
+			type = INTEGER;
+			this.generator.emit("ENT", value);
 			printer.endProduction("BaseExpr");
 			
 			break;
@@ -519,9 +414,8 @@ public Parser(Scanner s, Printer p) {
 		case 17: {
 			Get();
 			printer.print(t.val);
-			this.lastType = BOOLEAN;
-			this.isExpected(BOOLEAN);
-			this.generator.push(1);
+			this.generator.emit("ENT", 1);
+			type = BOOLEAN;
 			printer.endProduction("BaseExpr");
 			
 			break;
@@ -529,96 +423,85 @@ public Parser(Scanner s, Printer p) {
 		case 18: {
 			Get();
 			printer.print(t.val);
-			this.lastType = BOOLEAN;
-			this.isExpected(BOOLEAN);
-			this.generator.push(0);
+			this.generator.emit("ENT", 0);
+			type = BOOLEAN;
 			printer.endProduction("BaseExpr");
 			
 			break;
 		}
 		case 19: {
 			Get();
-			this.lastType = INTEGER;
-			this.isExpected(INTEGER);
-			this.generator.commandRead();
+			type = INTEGER;
+			this.generator.emit("REA");
 			
 			break;
 		}
 		default: SynErr(34); break;
 		}
+		return type;
 	}
 
-	void op() {
+	OpData  op() {
+		OpData  op;
 		printer.startProduction("op");
-		printer.print(la.val); 
+		printer.print(la.val);
+		op = new OpData();
+		op.cw = "";
+		op.expected = UNDEFINED;
+		op.result = UNDEFINED;
+		
 		switch (la.kind) {
 		case 22: {
 			Get();
-			if (!isCurrentContextValid(INTEGER)) {
-			}
-			this.updateContext(INTEGER, INTEGER);
-			this.currentContext.previousOp = CodeGenerator.ops.ADD;
-			printer.endProduction("op");
+			op.cw = "ADD";
+			op.expected = INTEGER;
+			op.result = INTEGER;
 			
 			break;
 		}
 		case 16: {
 			Get();
-			if (!isCurrentContextValid(INTEGER)) {
-			// @SLX: SUB
-			}
-			this.updateContext(INTEGER, INTEGER);
-			this.currentContext.previousOp = CodeGenerator.ops.SUB;
-			printer.endProduction("op");
+			op.cw = "SUB";
+			op.expected = INTEGER;
+			op.result = INTEGER;
 			
 			break;
 		}
 		case 23: {
 			Get();
-			if (!isCurrentContextValid(INTEGER)) {
-			// @SLX: MUL
-			}
-			this.updateContext(INTEGER, INTEGER);
-			this.currentContext.previousOp = CodeGenerator.ops.MUL;
-			printer.endProduction("op");
+			op.cw = "MUL";
+			op.expected = INTEGER;
+			op.result = INTEGER;
 			
 			break;
 		}
 		case 24: {
 			Get();
-			if (!isCurrentContextValid(INTEGER)) {
-			// @SLX: DIV
-			}
-			this.updateContext(INTEGER, INTEGER);
-			this.currentContext.previousOp = CodeGenerator.ops.DIV;
-			printer.endProduction("op");
+			op.cw = "DIV";
+			op.expected = INTEGER;
+			op.result = INTEGER;
 			
 			break;
 		}
 		case 25: {
 			Get();
-			if (!isCurrentContextValid(INTEGER, BOOLEAN)) {
-			// @SLX: LESS_THAN
-			}
-			this.updateContext(BOOLEAN, INTEGER);
-			this.currentContext.previousOp = CodeGenerator.ops.LSS;
-			printer.endProduction("op");
+			op.cw = "RLT";
+			op.expected = INTEGER;
+			op.result = BOOLEAN;
 			
 			break;
 		}
 		case 26: {
 			Get();
-			if (!isCurrentContextValid(BOOLEAN)) {
-			// @SLX: AND
-			}
-			this.updateContext(BOOLEAN, BOOLEAN);
-			this.currentContext.previousOp = CodeGenerator.ops.AND;
-			printer.endProduction("op");
+			op.cw = "AND";
+			op.expected = BOOLEAN;
+			op.result = BOOLEAN;
 			
 			break;
 		}
 		default: SynErr(35); break;
 		}
+		return op;
 	}
 
 

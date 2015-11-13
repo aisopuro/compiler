@@ -10,7 +10,7 @@ public class TestMain {
 		File file = new File("/home/aisopuro/workspace_java/compiler/t1064200/tests/"); // Directory containing test inputs
 		
 		// Run tests on all test cases
-		String name;
+		String name = "/home/aisopuro/workspace_java/compiler/t1064200/tests/doubleVariableDeclaration.tst";
 		
 		for ( File current : file.listFiles() ) {
 			name = current.getPath();

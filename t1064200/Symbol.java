@@ -1,3 +1,5 @@
+import java.util.ArrayList;
+
 public class Symbol {
 	private String name;
 	private int type;
